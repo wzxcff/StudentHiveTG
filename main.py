@@ -1,18 +1,20 @@
 import os, logging, asyncio, datetime
 import platform
 import subprocess
+import psutil
 
-import psutil, json
+from datetime import timedelta
 from pymongo import MongoClient
 from dotenv import load_dotenv
 from telebot import types
 from telebot.async_telebot import AsyncTeleBot
-from telebot.asyncio_helper import send_message
 from telebot.types import ReplyKeyboardRemove
 
 # TODO: Implement in schedule view check if it's greater than 4096 symbols (max tg symbols), and do something with it.
-# TODO: Make working deadlines
+# TODO: Make notifications with possibility to disable them
 # TODO: Make marking on lessons
+# TODO: Make joke
+# TODO: Make notification from headman working
 
 
 # logging setup
@@ -29,6 +31,7 @@ devs = str(os.getenv("DEVS")).replace("[", "").replace("]", "").split(", ")
 headman = int(os.getenv("HEADMAN"))
 group = str(os.getenv("GROUP")).replace("[", "").replace("]", "").split(", ")
 group_names = str(os.getenv("GROUP_NAMES")).replace("[", "").replace("]", "").split(", ")
+unique = str(os.getenv("UNIQUE")).replace("[", "").replace("]", "").split(", ")
 lecturers = str(os.getenv("LECTURERS")).replace("[", "").replace("]", "").split(", ") + ["Повернутись"]
 
 #DB
@@ -45,6 +48,7 @@ deadlines_collection = db["deadlines"]
 day_weeks = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
 user_states = {}
 user_schedule = {}
+user_deadlines = {}
 links_arr = str(os.getenv("LINKS")).replace("[", "").replace("]", "").split(", ")
 
 # if os.path.exists("group.json"):
@@ -145,6 +149,10 @@ main_mark_markup = types.InlineKeyboardMarkup(row_width=3)
 main_mark_labels = ["1", "2", "3", "4", "5", "всіх", "Повернутись"]
 build_inline_buttons(main_mark_markup, main_mark_labels)
 
+admin_deadlines_markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
+admin_deadlines_labels = ["Додати", "Видалити", "Повернутись"]
+build_inline_buttons(admin_deadlines_markup, admin_deadlines_labels)
+
 main_deadline_markup = types.InlineKeyboardMarkup(row_width=1)
 main_deadline_markup.add(back_button)
 
@@ -201,7 +209,7 @@ async def get_schedule(day):
         schedule_list.append(f"*Пара {entry['number']}:*\n*Дисципліна:* {entry['subject']}\n*Тип:* {entry['type']}\n*Викладач:* {entry['lecturer']}\n*Час:* {entry['time']}\n*Посилання:* {entry['link']}\n")
     return "\n".join(schedule_list) if schedule_list else f"Сьогодні немає пар. ({day})"
 
-async def get_week_schedule():
+async def get_week_schedule(separate=None):
     result = "———————————————————"
     for day in day_weeks:
         schedule = schedule_collection.find({"day": day})
@@ -218,7 +226,7 @@ async def get_week_schedule():
     if len(result) < 4096:
         return result
     else:
-        logging.CRITICAL("Schedule message length exceeds 4096 allowed symbols.")
+        return await get_week_schedule(separate=True)
 
 async def get_server_status():
     uptime = subprocess.check_output("uptime -p", shell=True).decode().strip()
@@ -241,6 +249,51 @@ async def get_server_status():
         f"Disk Usage: {disk_usage}%\n"
     )
     return status_message
+
+async def send_daily_notifications():
+    while True:
+        now = datetime.datetime.now()
+        target_time = now.replace(hour=9, minute=0, second=0, microsecond=0)
+
+        if now > target_time:
+            target_time += timedelta(days=1)
+
+        wait_seconds = (target_time - now).total_seconds()
+        logging.info(f"Sleeping for {wait_seconds} seconds until 9 AM.")
+
+        await asyncio.sleep(wait_seconds)
+
+        past_deadlines = deadlines_collection.find({"date": {"$lt": now}})
+        past_deadline_titles = [deadline["title"] for deadline in past_deadlines]
+
+        if past_deadline_titles:
+            deadlines_collection.delete_many({"title": {"$in": past_deadline_titles}})
+            logging.info(f"Deleted past deadlines: {past_deadline_titles}")
+
+        users = [user["_id"] for user in group_collection.find()]
+        next_day = (now + timedelta(days=1)).strftime("%d.%m")
+
+        deadlines_next_day = list(deadlines_collection.find().sort("date", 1))
+
+
+        if deadlines_next_day:
+            for user_id in users:
+                try:
+                    if str(user_id) in unique:
+                        message = f"Доброго ранку, мій солоденький. Нагадую тобі щодо дедлайнів на завтра <3.\n\n*{next_day}*\n\n"
+                    else:
+                        message = f"Доброго ранку, нагадую щодо дедлайнів на завтра.\n\n*{next_day}*\n\n"
+                    for deadline in deadlines_next_day:
+                        if deadline["date"].strftime("%d.%m") == next_day:
+                            message += f"{deadline["date"].strftime("%H.%M")} – {deadline['title']}\n"
+                    await bot.send_message(int(user_id), message, parse_mode="Markdown")
+                except Exception as e:
+                    logging.warning(f"Failed to send message to {user_id}: {e}")
+            logging.info("Reminders about deadlines were sent successfully!")
+        else:
+            logging.info("No deadlines found for the next day, skipping reminders.")
+
+        await asyncio.sleep(86400)
 
 # BOT HANDLERS
 
@@ -402,7 +455,7 @@ async def message_handler(message):
             # Default commands
             elif message.text == "/start":
                 welcome_message = "Hello world!"
-                if str(message.from_user) in admins:
+                if str(message.from_user.id) in admins:
                     await bot.send_message(message.chat.id, welcome_message, reply_markup=main_menu_admin)
                 else:
                     await bot.send_message(message.chat.id, welcome_message, reply_markup=main_menu_markup)
@@ -457,18 +510,63 @@ async def message_handler(message):
                 user_schedule[message.chat.id] = {"day": message.text}
                 await bot.send_message(message.chat.id, "Оберіть дію.", reply_markup=admin_schedule_day_edit)
             elif message.text == "Дедлайни":
-                current_entries = list(deadlines_collection.find())
-                sorted_entries = sorted(current_entries, key=lambda x: x["date"])
+                sorted_entries = list(deadlines_collection.find().sort("date", 1))
                 if sorted_entries:
-                    result = "Найближчі дедлайни:\n\n"
+                    result = "*Найближчі дедлайни:*\n\n"
+                    current_date = None
+
                     for entry in sorted_entries:
-                        formatted_date = entry["date"].strftime("%d-%m-%Y %H:%M:%S")
-                        result += f"- {entry['name']}: {formatted_date}\n"
+                        entry_date = entry["date"].strftime("%d.%m")
+                        entry_time = entry["date"].strftime("%H:%M")
+
+                        # Check if the date has changed from the previous entry
+                        if current_date != entry_date:
+                            # Add a new date header for each unique date
+                            result += f"\n*{entry_date}*\n"
+                            current_date = entry_date
+
+                        # Add time and title of the deadline under the date header
+                        result += f"{entry_time} – {entry['title']}\n"
                 else:
                     result = "Дедлайнів немає."
-                await bot.send_message(message.chat.id, result, parse_mode="Markdown")
-            elif message.text == "Редагувати дедлайн":
-                pass
+                if str(message.from_user.id) in admins:
+                    await bot.send_message(message.chat.id, result, parse_mode="Markdown", reply_markup=admin_deadlines_markup)
+                else:
+                    await bot.send_message(message.chat.id, result, parse_mode="Markdown")
+            elif message.text == "Додати" and str(message.from_user.id) in admins:
+                user_states[message.chat.id] = "adding_deadline"
+                await bot.send_message(message.chat.id, "Надішліть мені заголовок дедлайну.")
+            elif user_state == "adding_deadline":
+                user_states[message.chat.id] = "choosing_time"
+                user_deadlines[message.chat.id] = {"title": message.text}
+                await bot.send_message(message.chat.id, "Тепер надішліть дату та час.\nФормат: DD.MM HH:MM")
+            elif user_state == "choosing_time":
+                try:
+                    deadline_date = datetime.datetime.strptime(message.text, "%d.%m %H:%M")
+                    deadlines_collection.insert_one({"title": user_deadlines[message.chat.id]["title"], "date": deadline_date})
+                    await bot.send_message(message.chat.id, "Дедлайн успішно додано!", reply_markup=main_menu_admin)
+                    user_states.pop(message.chat.id, None)
+                    user_deadlines.pop(message.chat.id, None)
+                    logging.info(f"[DEADLINE] [{message.from_user.username}] - Added new deadline")
+                except ValueError:
+                    await bot.send_message(message.chat.id, "Будь ласка, введіть дату у форматі Day.Monh Hours:Minutes (01.09 13:00)")
+            elif message.text == "Видалити" and str(message.from_user.id) in admins:
+                user_states[message.chat.id] = "deleting_deadline"
+                await bot.send_message(message.chat.id, "Надішліть мені заголовок дедлайну для видалення, він повинен повністю співпадати.")
+            elif user_state == "deleting_deadline":
+                user_states.pop(message.chat.id, None)
+                deadlines = list(deadlines_collection.find())
+                for entry in deadlines:
+                    if entry["title"] == message.text:
+                        deadlines_collection.delete_one({"title": message.text})
+                        await bot.send_message(message.chat.id, "Дедлайн було видалено!")
+                        logging.info(f"[DEADLINE] [{message.from_user.username}] - Removed deadline")
+                        break
+                else:
+                    await bot.send_message(message.chat.id, "Йой! Не знайшов такого дедлайну.")
+
+
+
             logging.info(f"[MESSAGE] [{message.from_user.first_name} {message.from_user.last_name}] - {message.text}")
         elif message.chat.type == "supergroup" or message.chat.type == "group":
             bot_info = await bot.get_me()
@@ -493,14 +591,14 @@ async def message_handler(message):
         info_arr = [message.from_user.username, message.from_user.first_name, message.from_user.last_name]
         if message.text == "Надіслати запит":
             if pending_join_collection.find_one({"info": info_arr}):
-                await bot.send_message(message.chat.id,"Ваш запит на доступ вже надіслано. Розробник також людина яка відпочиває, дякую за розуміння.\nНе переймайтеся, Ваш запит обовʼязково переглянуть.")
+                await bot.send_message(message.chat.id,"Ваш запит на доступ вже надіслано. Староста також людина яка відпочиває, дякую за розуміння.\nНе переймайтеся, Ваш запит обовʼязково переглянуть.")
             elif group_collection.find_one({"_id": str(message.from_user.id)}):
                 await bot.send_message(message.chat.id, "Вам вже надано доступ!", reply_markup=main_menu_markup)
             elif blacklist_requests.find_one({"_id": str(message.from_user.id)}):
                 await bot.send_message(message.chat.id, "Ваш ID в чорному списку, звʼязок неможливий.", reply_markup=ReplyKeyboardRemove())
             else:
                 user_states[message.chat.id] = "want_to_use"
-                await bot.send_message(message.chat.id, "Напишіть коротеньке повідомлення чому Вам потрібен доступ. \nПояснення значно полегшать життя розробнику, дякую за розуміння! :)")
+                await bot.send_message(message.chat.id, "Напишіть коротеньке повідомлення чому Вам потрібен доступ. \nПояснення значно полегшить життя, дякую за розуміння! :)")
         elif user_states.get(message.chat.id) == "want_to_use":
             if message.text != "Надіслати запит":
                 user_states.pop(message.chat.id, None)
@@ -523,10 +621,12 @@ async def message_handler(message):
                 blacklist = types.InlineKeyboardButton("Чорний список", callback_data=f"blacklist_{message.from_user.id}")
                 keyboard.add(approve, decline, blacklist)
 
-                await bot.send_message(devs[0], f"*У вас новий запит на використовування боту!*\n\n\nВід {user_info}.\n\nТекст повідомлення:\n{message.text}", parse_mode="Markdown", reply_markup=keyboard)
+                await bot.send_message(int(headman), f"*Новий запит на використовування боту!*\n\n\nВід {user_info}.\n\nТекст повідомлення:\n{message.text}", parse_mode="Markdown", reply_markup=keyboard)
                 await bot.send_message(message.chat.id, "Ваш запит було надіслано, чекайте на відповідь.")
+                logging.info(f"[REQUEST] [{message.from_user.username}] - Sent request to access bot!")
         else:
-            await bot.send_message(message.chat.id, "Після оновлення бот став з обмеженим доступом, якщо Ви бачете це повідмолення, вас не було занесено до вайт лісту.\n\nЯкщо вважаєте що це було помилково, або вам потрібен доступ - звʼязок з розробником за кнопкою нижче.", reply_markup=guest_markup)
+            logging.info(f"[REQUEST] [{message.from_user.username}] - Someone tried to access bot! ")
+            await bot.send_message(message.chat.id, "Після оновлення бот став з обмеженим доступом, якщо Ви бачете це повідмолення, вас не було занесено до вайт лісту.\n\nЯкщо вважаєте що це було помилково, або вам потрібен доступ - звʼязок зі старостою за кнопкою нижче.", reply_markup=guest_markup)
 
 # Handle callback query
 @bot.callback_query_handler(func=lambda call: True)
@@ -539,19 +639,23 @@ async def callback_query(call):
         pending_join_collection.delete_one({"_id": int(user_id)})
         group_collection.insert_one({"_id": user_id, "username": info["info"][0]})
         await bot.send_message(user_id, "Вітаю, Ваш запит на доступ було ухвалено!\nПриємного користування <3", reply_markup=main_menu_markup)
+        logging.info(f"[REQUEST] [{call.message.from_user.username}] - Request was approved!")
     elif call.data.startswith("decline_"):
         pending_join_collection.delete_one({"_id": int(user_id)})
         await bot.send_message(user_id, "Нажаль Ваш запит на доступ було відхилено.")
+        logging.info(f"[REQUEST] [{call.message.from_user.username}] - Request was denied")
     elif call.data.startswith("blacklist_"):
         info = list(entry)[0]
 
         pending_join_collection.delete_one({"_id": int(user_id)})
         blacklist_requests.insert_one({"_id": user_id, "username": info["info"][0]})
         await bot.send_message(user_id, "Вас було занесено до чорного списку, запити від вас більше надходити не будуть.")
+        logging.info(f"[REQUEST] [{call.message.from_user.username}] - User blacklisted from now.")
     await bot.edit_message_reply_markup(chat_id=call.message.chat.id, message_id=call.message.id)
 
 # START BOT
 async def main():
+    asyncio.create_task(send_daily_notifications())
     await bot.polling(none_stop=True)
 
 logging.info("Started successfully!")
