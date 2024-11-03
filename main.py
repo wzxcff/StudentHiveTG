@@ -11,6 +11,9 @@ from telebot.asyncio_helper import send_message
 from telebot.types import ReplyKeyboardRemove
 
 # TODO: Implement in schedule view check if it's greater than 4096 symbols (max tg symbols), and do something with it.
+# TODO: Make working deadlines
+# TODO: Make marking on lessons
+
 
 # logging setup
 
@@ -37,26 +40,27 @@ group_collection = db["group"]
 pending_join_collection = db["pending_joins"]
 blacklist_requests = db["blacklist_requests"]
 user_settings = db["user_settings"]
+deadlines_collection = db["deadlines"]
 
 day_weeks = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
 user_states = {}
 user_schedule = {}
 links_arr = str(os.getenv("LINKS")).replace("[", "").replace("]", "").split(", ")
 
-if os.path.exists("group.json"):
-    with open("group.json", "r", encoding="utf-8") as f:
-        group_ids = json.load(f)
-        logging.info("Found group json")
-else:
-    logging.info("group json not found, trying to create")
-    try:
-        group_dict = dict(zip(group, group_names))
-        with open("group.json", "w", encoding="UTF-8") as f:
-            json.dump(group_dict, f, indent=6)
-            logging.info("Created group json successfully")
-            group_ids = group_dict
-    except Exception as e:
-        logging.warning(e)
+# if os.path.exists("group.json"):
+#     with open("group.json", "r", encoding="utf-8") as f:
+#         group_ids = json.load(f)
+#         logging.info("Found group json")
+# else:
+#     logging.info("group json not found, trying to create")
+#     try:
+#         group_dict = dict(zip(group, group_names))
+#         with open("group.json", "w", encoding="UTF-8") as f:
+#             json.dump(group_dict, f, indent=6)
+#             logging.info("Created group json successfully")
+#             group_ids = group_dict
+#     except Exception as e:
+#         logging.warning(e)
 
 # MARKUPS
 
@@ -81,11 +85,11 @@ back_keyboard = types.ReplyKeyboardMarkup(row_width=1, resize_keyboard=True)
 back_button = types.KeyboardButton("Повернутись")
 back_keyboard.add(back_button)
 
-main_menu_markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
+main_menu_markup = types.ReplyKeyboardMarkup(row_width=3, resize_keyboard=True)
 main_menu_labels = ["Розклад", "Відмітитись на парах", "Дедлайни", "Фідбек старості"]
 build_reply_buttons(main_menu_markup, main_menu_labels)
 
-main_menu_admin = types.ReplyKeyboardMarkup(row_width=1, resize_keyboard=True)
+main_menu_admin = types.ReplyKeyboardMarkup(row_width=3, resize_keyboard=True)
 main_menu_admin_labels = main_menu_labels + ["Оповістки"]
 build_reply_buttons(main_menu_admin, main_menu_admin_labels)
 
@@ -154,7 +158,7 @@ logging.info("Built buttons")
 # DB HANDLERS
 
 
-def schedule_entry(data_dict: dict):
+async def schedule_entry(data_dict: dict):
     day, mode, number, time, subject, type_l, lecturer, link, number_edit = list(data_dict.values())
     entry = {
         "day": day,
@@ -178,7 +182,8 @@ def schedule_entry(data_dict: dict):
                 break
         sorted_entries = sorted(current_entries, key=lambda x: x["number"])
         schedule_collection.delete_many({"day": day})
-        schedule_collection.insert_many(sorted_entries)
+        if sorted_entries:
+            schedule_collection.insert_many(sorted_entries)
     elif mode == "delete":
         for i, current_entry in enumerate(current_entries):
             if current_entry["number"] == number_edit:
@@ -188,18 +193,6 @@ def schedule_entry(data_dict: dict):
         schedule_collection.delete_many({"day": day})
         if sorted_entries:
             schedule_collection.insert_many(sorted_entries)
-
-
-def edit_schedule_entry(data_dict: dict):
-    day, _, number, time, subject, type_l, lecturer, link = list(data_dict.values())
-    entry = {
-        "day": day,
-        "number": number,
-        "type": type_l,
-        "time": time,
-        "subject": subject,
-        "lecturer": lecturer,
-    }
 
 async def get_schedule(day):
     entries = schedule_collection.find({"day": day})
@@ -227,7 +220,7 @@ async def get_week_schedule():
     else:
         logging.CRITICAL("Schedule message length exceeds 4096 allowed symbols.")
 
-def get_server_status():
+async def get_server_status():
     uptime = subprocess.check_output("uptime -p", shell=True).decode().strip()
 
     cpu_usage = psutil.cpu_percent(interval=1)
@@ -264,26 +257,32 @@ async def handle_feedback(message):
 async def send_feedback(message):
     if user_states.get(message.chat.id) == "awaiting_feedback":
         if message.text == "Повернутись":
-            await bot.send_message(message.chat.id, "Скасував відправку фідбеку.", reply_markup=main_menu_markup)
+            if str(message.from_user.id) in admins:
+                await bot.send_message(message.chat.id, "Скасував відправку фідбеку.", reply_markup=main_menu_admin)
+            else:
+                await bot.send_message(message.chat.id, "Скасував відправку фідбеку.", reply_markup=main_menu_markup)
             user_states.pop(message.chat.id, None)
         else:
             feedback_message = f"*Анонімний фідбек:*\n\n{message.text}"
             await bot.send_message(headman, feedback_message, parse_mode="Markdown")
-            await bot.send_message(message.chat.id, "Ваш фідбек надіслано, дякую!", reply_markup=main_menu_markup)
+            if str(message.from_user.id) in admins:
+                await bot.send_message(message.chat.id, "Ваш фідбек надіслано, дякую!", reply_markup=main_menu_admin)
+            else:
+                await bot.send_message(message.chat.id, "Ваш фідбек надіслано, дякую!", reply_markup=main_menu_markup)
             user_states.pop(message.chat.id, None)
 
 # Main message handler which being logged
 @bot.message_handler(content_types=['text'])
 async def message_handler(message):
     global user_states
-    if str(message.from_user.id) in list(group_ids.keys()):
+    if group_collection.find_one({"_id": str(message.from_user.id)}):
         # Chat type checking
         if message.chat.type == "private":
             # States checking
             user_state = user_states.get(message.chat.id)
             if user_state == "selecting_day":
                 if message.text == "Повернутись":
-                    await bot.send_message(message.chat.id, "Скасував зміну розкладу.", reply_markup=main_menu_markup)
+                    await bot.send_message(message.chat.id, "Скасував зміну розкладу.", reply_markup=main_menu_admin)
                     user_states.pop(message.chat.id, None)
                     user_schedule.pop(message.chat.id, None)
                 elif message.text in admin_schedule_day_labels:
@@ -306,7 +305,7 @@ async def message_handler(message):
                         await bot.send_message(message.chat.id, "Розклад на день було видалено!", reply_markup=admin_schedule_edit)
             elif user_state == "selecting_to_delete":
                 if message.text == "Повернутись":
-                    await bot.send_message(message.chat.id, "Скасував зміну розкладу.", reply_markup=main_menu_markup)
+                    await bot.send_message(message.chat.id, "Скасував зміну розкладу.", reply_markup=main_menu_admin)
                     user_states.pop(message.chat.id, None)
                     user_schedule.pop(message.chat.id, None)
                 else:
@@ -314,13 +313,13 @@ async def message_handler(message):
                     for key in keys:
                         user_schedule[message.chat.id][key] = None
                     user_schedule[message.chat.id]["number_edit"] = message.text
-                    schedule_entry(user_schedule[message.chat.id])
+                    await schedule_entry(user_schedule[message.chat.id])
                     user_states.pop(message.chat.id, None)
                     user_schedule.pop(message.chat.id, None)
-                    await bot.send_message(message.chat.id, "Розклад змінено!", reply_markup=main_menu_markup)
+                    await bot.send_message(message.chat.id, "Розклад змінено!", reply_markup=main_menu_admin)
             elif user_state == "selecting_number":
                 if message.text == "Повернутись":
-                    await bot.send_message(message.chat.id, "Скасував зміну розкладу.", reply_markup=main_menu_markup)
+                    await bot.send_message(message.chat.id, "Скасував зміну розкладу.", reply_markup=main_menu_admin)
                     user_states.pop(message.chat.id, None)
                     user_schedule.pop(message.chat.id, None)
                 else:
@@ -329,7 +328,7 @@ async def message_handler(message):
                     await bot.send_message(message.chat.id, "Оберіть час.", reply_markup=admin_schedule_time)
             elif user_state == "selecting_time":
                 if message.text == "Повернутись":
-                    await bot.send_message(message.chat.id, "Скасував зміну розкладу.", reply_markup=main_menu_markup)
+                    await bot.send_message(message.chat.id, "Скасував зміну розкладу.", reply_markup=main_menu_admin)
                     user_states.pop(message.chat.id, None)
                     user_schedule.pop(message.chat.id, None)
                 else:
@@ -338,7 +337,7 @@ async def message_handler(message):
                     await bot.send_message(message.chat.id, "Оберіть дисципліну.", reply_markup=admin_schedule_subjects)
             elif user_state == "selecting_subject":
                 if message.text == "Повернутись":
-                    await bot.send_message(message.chat.id, "Скасував зміну розкладу.", reply_markup=main_menu_markup)
+                    await bot.send_message(message.chat.id, "Скасував зміну розкладу.", reply_markup=main_menu_admin)
                     user_states.pop(message.chat.id, None)
                     user_schedule.pop(message.chat.id, None)
                 else:
@@ -347,7 +346,7 @@ async def message_handler(message):
                     await bot.send_message(message.chat.id, "Оберіть тип пари.", reply_markup=admin_schedule_type)
             elif user_state == "selecting_type":
                 if message.text == "Повернутись":
-                    await bot.send_message(message.chat.id, "Скасував зміну розкладу.", reply_markup=main_menu_markup)
+                    await bot.send_message(message.chat.id, "Скасував зміну розкладу.", reply_markup=main_menu_admin)
                     user_states.pop(message.chat.id, None)
                     user_schedule.pop(message.chat.id, None)
                 else:
@@ -356,7 +355,7 @@ async def message_handler(message):
                     await bot.send_message(message.chat.id, "Оберіть викладача.", reply_markup=admin_schedule_lecturer)
             elif user_state == "selecting_lecturer":
                 if message.text == "Повернутись":
-                    await bot.send_message(message.chat.id, "Скасував зміну розкладу.", reply_markup=main_menu_markup)
+                    await bot.send_message(message.chat.id, "Скасував зміну розкладу.", reply_markup=main_menu_admin)
                     user_states.pop(message.chat.id, None)
                     user_schedule.pop(message.chat.id, None)
                 else:
@@ -365,7 +364,7 @@ async def message_handler(message):
                     await bot.send_message(message.chat.id, "Оберіть посилання зі збережених, або надішліть своє.", reply_markup=admin_schedule_links)
             elif user_state == "selecting_link":
                 if message.text == "Повернутись":
-                    await bot.send_message(message.chat.id, "Скасував зміну розкладу.", reply_markup=main_menu_markup)
+                    await bot.send_message(message.chat.id, "Скасував зміну розкладу.", reply_markup=main_menu_admin)
                     user_states.pop(message.chat.id, None)
                     user_schedule.pop(message.chat.id, None)
                 else:
@@ -382,7 +381,7 @@ async def message_handler(message):
                         await bot.send_message(message.chat.id,f"*Перевірте інформацію*\n\nДень тижня: {user_schedule[message.chat.id]['day']}\nДисципліна: {user_schedule[message.chat.id]['subject']}\nТип: {user_schedule[message.chat.id]['type']}\nВикладач: {user_schedule[message.chat.id]['lecturer']}\nЧас: {user_schedule[message.chat.id]['time']}\nПосилання: {user_schedule[message.chat.id]['link']}\n\nЦе вірно?", parse_mode="Markdown", reply_markup=admin_confirmation)
             elif user_state == "selecting_number_to_edit":
                 if message.text == "Повернутись":
-                    await bot.send_message(message.chat.id, "Скасував зміну розкладу.", reply_markup=main_menu_markup)
+                    await bot.send_message(message.chat.id, "Скасував зміну розкладу.", reply_markup=main_menu_admin)
                     user_states.pop(message.chat.id, None)
                     user_schedule.pop(message.chat.id, None)
                 else:
@@ -392,19 +391,23 @@ async def message_handler(message):
             elif user_state == "confirmation":
                 if message.text == "Так, вірно":
                     print(user_schedule[message.chat.id])
-                    schedule_entry(user_schedule[message.chat.id])
+                    await schedule_entry(user_schedule[message.chat.id])
                     user_states.pop(message.chat.id)
                     user_schedule.pop(message.chat.id)
-                    await bot.send_message(message.chat.id, "Зміни збережено!", reply_markup=main_menu_markup)
+                    await bot.send_message(message.chat.id, "Зміни збережено!", reply_markup=main_menu_admin)
                 elif message.text == "Ні, скинути":
                     user_states.pop(message.chat.id, None)
                     user_schedule.pop(message.chat.id, None)
-                    await bot.send_message(message.chat.id, "Зміни скинуто!", reply_markup=main_menu_markup)
+                    await bot.send_message(message.chat.id, "Зміни скинуто!", reply_markup=main_menu_admin)
             # Default commands
             elif message.text == "/start":
-                await bot.send_message(message.chat.id, "Hello world!", reply_markup=main_menu_markup)
+                welcome_message = "Hello world!"
+                if str(message.from_user) in admins:
+                    await bot.send_message(message.chat.id, welcome_message, reply_markup=main_menu_admin)
+                else:
+                    await bot.send_message(message.chat.id, welcome_message, reply_markup=main_menu_markup)
             elif message.text == "/keyboard":
-                if message.from_user.id in admins:
+                if str(message.from_user.id) in admins:
                     await bot.send_message(message.chat.id, "Надаю клавіатуру.", reply_markup=main_menu_admin)
                 else:
                     await bot.send_message(message.chat.id, "Надаю клавіатуру.", reply_markup=main_menu_markup)
@@ -425,10 +428,13 @@ async def message_handler(message):
                 except FileNotFoundError:
                     await bot.send_message(message.chat.id, "Не вдалося видалити файл, його не існує.")
             elif message.text == "/system_status" and str(message.from_user.id) in devs:
-                await bot.send_message(message.chat.id, get_server_status())
+                await bot.send_message(message.chat.id, await get_server_status())
             # Navigation
             elif message.text == "Повернутись":
-                await bot.send_message(message.chat.id, "Надав головне меню.", reply_markup=main_menu_markup)
+                if str(message.from_user.id) in admins:
+                    await bot.send_message(message.chat.id, "Надав головне меню.", reply_markup=main_menu_admin)
+                else:
+                    await bot.send_message(message.chat.id, "Надав головне меню.", reply_markup=main_menu_markup)
             elif message.text == "Розклад":
                 if str(message.from_user.id) in admins:
                     await bot.send_message(message.chat.id, "Оберіть режим", reply_markup=admin_schedule_markup)
@@ -450,6 +456,19 @@ async def message_handler(message):
                 user_states[message.chat.id] = "selecting_day"
                 user_schedule[message.chat.id] = {"day": message.text}
                 await bot.send_message(message.chat.id, "Оберіть дію.", reply_markup=admin_schedule_day_edit)
+            elif message.text == "Дедлайни":
+                current_entries = list(deadlines_collection.find())
+                sorted_entries = sorted(current_entries, key=lambda x: x["date"])
+                if sorted_entries:
+                    result = "Найближчі дедлайни:\n\n"
+                    for entry in sorted_entries:
+                        formatted_date = entry["date"].strftime("%d-%m-%Y %H:%M:%S")
+                        result += f"- {entry['name']}: {formatted_date}\n"
+                else:
+                    result = "Дедлайнів немає."
+                await bot.send_message(message.chat.id, result, parse_mode="Markdown")
+            elif message.text == "Редагувати дедлайн":
+                pass
             logging.info(f"[MESSAGE] [{message.from_user.first_name} {message.from_user.last_name}] - {message.text}")
         elif message.chat.type == "supergroup" or message.chat.type == "group":
             bot_info = await bot.get_me()
@@ -507,7 +526,7 @@ async def message_handler(message):
                 await bot.send_message(devs[0], f"*У вас новий запит на використовування боту!*\n\n\nВід {user_info}.\n\nТекст повідомлення:\n{message.text}", parse_mode="Markdown", reply_markup=keyboard)
                 await bot.send_message(message.chat.id, "Ваш запит було надіслано, чекайте на відповідь.")
         else:
-            await bot.send_message(message.chat.id, "Після оновлення бот став з обмеженим доступом, якщо Ви бачете це повідмолення, вас не було добавлено до вайт лісту.\n\nЯкщо вважаєте що це було помилково, або вам потрібен доступ - звʼязок з розробником за кнопкою нижче.", reply_markup=guest_markup)
+            await bot.send_message(message.chat.id, "Після оновлення бот став з обмеженим доступом, якщо Ви бачете це повідмолення, вас не було занесено до вайт лісту.\n\nЯкщо вважаєте що це було помилково, або вам потрібен доступ - звʼязок з розробником за кнопкою нижче.", reply_markup=guest_markup)
 
 # Handle callback query
 @bot.callback_query_handler(func=lambda call: True)
