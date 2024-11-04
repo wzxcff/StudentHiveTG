@@ -1,7 +1,7 @@
 import os, logging, asyncio, datetime
 import platform
 import subprocess
-import psutil
+import psutil, time
 
 from datetime import timedelta
 from pymongo import MongoClient
@@ -11,7 +11,6 @@ from telebot.async_telebot import AsyncTeleBot
 from telebot.types import ReplyKeyboardRemove
 
 # TODO: Implement in schedule view check if it's greater than 4096 symbols (max tg symbols), and do something with it.
-# TODO: Make notifications with possibility to disable them
 # TODO: Make marking on lessons
 # TODO: Make joke
 # TODO: Make notification from headman working
@@ -44,6 +43,7 @@ pending_join_collection = db["pending_joins"]
 blacklist_requests = db["blacklist_requests"]
 user_settings = db["user_settings"]
 deadlines_collection = db["deadlines"]
+attendance_collection = db["attendance"]
 
 day_weeks = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
 user_states = {}
@@ -90,7 +90,7 @@ back_button = types.KeyboardButton("Повернутись")
 back_keyboard.add(back_button)
 
 main_menu_markup = types.ReplyKeyboardMarkup(row_width=3, resize_keyboard=True)
-main_menu_labels = ["Розклад", "Відмітитись на парах", "Дедлайни", "Фідбек старості"]
+main_menu_labels = ["Розклад", "Відмітитись на парах", "Дедлайни", "Фідбек старості", "Повідомити про проблему"]
 build_reply_buttons(main_menu_markup, main_menu_labels)
 
 main_menu_admin = types.ReplyKeyboardMarkup(row_width=3, resize_keyboard=True)
@@ -209,7 +209,76 @@ async def get_schedule(day):
         schedule_list.append(f"*Пара {entry['number']}:*\n*Дисципліна:* {entry['subject']}\n*Тип:* {entry['type']}\n*Викладач:* {entry['lecturer']}\n*Час:* {entry['time']}\n*Посилання:* {entry['link']}\n")
     return "\n".join(schedule_list) if schedule_list else f"Сьогодні немає пар. ({day})"
 
-async def get_week_schedule(separate=None):
+async def show_lessons_for_attendance(message):
+    day = datetime.datetime.now().strftime("%d.%m")
+    day_to_find = datetime.datetime.now().strftime("%A")
+    lessons = list(schedule_collection.find({"day": day_to_find}))
+
+    if not lessons:
+        await bot.send_message(message.chat.id, "Сьогодні немає пар.")
+        return
+    markup = types.InlineKeyboardMarkup()
+    for lesson in lessons:
+        lesson_number = lesson["number"]
+        subject = lesson["subject"]
+        button = types.InlineKeyboardButton(f"Пара {lesson_number}: {subject}", callback_data=f"mark_{day}_{lesson_number}")
+        markup.add(button)
+    markup.add(types.InlineKeyboardButton("Скасувати відмітки", callback_data=f"mark_{day}_clear"))
+    if str(message.from_user.id) in admins:
+        markup.add(types.InlineKeyboardButton("Подивитись відмічених", callback_data=f"view_marked"))
+    await bot.send_message(message.chat.id, await get_schedule(day_to_find) + f"\n\n*Поставте відмітку на яких парах плануєте бути.*", reply_markup=markup, parse_mode="Markdown")
+
+
+async def view_attendance(message, day):
+    day_to_find = datetime.datetime.strptime(day + f".{datetime.datetime.now().year}", "%d.%m.%Y").strftime("%A")
+    lesson_attendance = attendance_collection.find({"day": day}).sort("lesson", 1)
+
+    response = f"Відвідуваність за *{day}*.\n\n"
+    lessons_dict = {}
+
+    for record in lesson_attendance:
+        lesson = record["lesson"]
+        attendees = record["attendees"]
+
+        lesson_info = schedule_collection.find_one({"day": day_to_find, "number": str(lesson)})
+        subject = lesson_info["subject"] if lesson_info else "Невідома дисципліна"
+
+        if lesson not in lessons_dict:
+            lessons_dict[lesson] = {
+                "subject": subject,
+                "attendees": []
+            }
+
+        for user in attendees:
+            if user is None:
+                logging.warning("Found None user_id in attendees.")
+                continue
+            lessons_dict[lesson]["attendees"].append(user)
+
+    # Construct the response message
+    for lesson, info in lessons_dict.items():
+        response += f"\nПара {lesson} – {info['subject']}:\n"
+        for user in info["attendees"]:
+            if user is None:
+                continue
+            try:
+                response += f" – {user[1]} {user[2] or ''} (@{user[0] or ''})\n"
+            except Exception as e:
+                response += f" – Error occurred, can't find info about user. See logs for details."
+                logging.warning(f"Failed to get user info for {user}: {e}")
+
+    if response == f"Відвідуваність за *{day}*.\n\n":
+        response += "Відміток немає"
+
+    markup = types.InlineKeyboardMarkup()
+    for i in range(7, 0, -1):
+        delta_day = (datetime.datetime.now() - datetime.timedelta(days=i)).strftime("%d.%m")
+        markup.add(types.InlineKeyboardButton(delta_day, callback_data=f"history_{delta_day}"))
+    markup.add(types.InlineKeyboardButton(datetime.datetime.now().strftime("%d.%m"), callback_data=f"history_{datetime.datetime.now().strftime("%d.%m")}"))
+
+    await bot.send_message(message.chat.id, response, parse_mode="Markdown", reply_markup=markup)
+
+async def get_week_schedule():
     result = "———————————————————"
     for day in day_weeks:
         schedule = schedule_collection.find({"day": day})
@@ -226,7 +295,7 @@ async def get_week_schedule(separate=None):
     if len(result) < 4096:
         return result
     else:
-        return await get_week_schedule(separate=True)
+        pass
 
 async def get_server_status():
     uptime = subprocess.check_output("uptime -p", shell=True).decode().strip()
@@ -249,6 +318,13 @@ async def get_server_status():
         f"Disk Usage: {disk_usage}%\n"
     )
     return status_message
+
+async def clear_old_attendance():
+    today = datetime.datetime.now()
+    clear_date = (today - datetime.timedelta(days=9)).strftime("%d.%m")
+
+    attendance_collection.delete_many({"day": clear_date})
+    logging.info("Cleared old attendances!")
 
 async def send_daily_notifications():
     while True:
@@ -279,19 +355,23 @@ async def send_daily_notifications():
         if deadlines_next_day:
             for user_id in users:
                 try:
-                    if str(user_id) in unique:
-                        message = f"Доброго ранку, мій солоденький. Нагадую тобі щодо дедлайнів на завтра <3.\n\n*{next_day}*\n\n"
+                    if user_settings.find_one({"_id": str(user_id), "deadline_reminder": True}):
+                        if str(user_id) in unique:
+                            message = f"Доброго ранку, мій солоденький. Нагадую тобі щодо дедлайнів на завтра <3.\n\n*{next_day}*\n\n"
+                        else:
+                            message = f"Доброго ранку, нагадую щодо дедлайнів на завтра.\n\n*{next_day}*\n\n"
+                        for deadline in deadlines_next_day:
+                            if deadline["date"].strftime("%d.%m") == next_day:
+                                message += f"{deadline["date"].strftime("%H.%M")} – {deadline['title']}\n"
+                        await bot.send_message(int(user_id), message, parse_mode="Markdown")
                     else:
-                        message = f"Доброго ранку, нагадую щодо дедлайнів на завтра.\n\n*{next_day}*\n\n"
-                    for deadline in deadlines_next_day:
-                        if deadline["date"].strftime("%d.%m") == next_day:
-                            message += f"{deadline["date"].strftime("%H.%M")} – {deadline['title']}\n"
-                    await bot.send_message(int(user_id), message, parse_mode="Markdown")
+                        logging.info(f"User {user_id} has turned off deadline reminders.")
                 except Exception as e:
                     logging.warning(f"Failed to send message to {user_id}: {e}")
             logging.info("Reminders about deadlines were sent successfully!")
         else:
             logging.info("No deadlines found for the next day, skipping reminders.")
+        await clear_old_attendance()
 
         await asyncio.sleep(86400)
 
@@ -443,7 +523,6 @@ async def message_handler(message):
                     await bot.send_message(message.chat.id, f"*Перевірте інформацію*\n\nДень тижня: {user_schedule[message.chat.id]['day']}\nДисципліна: {user_schedule[message.chat.id]['subject']}\nТип: {user_schedule[message.chat.id]['type']}\nВикладач: {user_schedule[message.chat.id]['lecturer']}\nЧас: {user_schedule[message.chat.id]['time']}\nПосилання: {user_schedule[message.chat.id]['link']}\n\nЦе вірно?", parse_mode="Markdown", reply_markup=admin_confirmation)
             elif user_state == "confirmation":
                 if message.text == "Так, вірно":
-                    print(user_schedule[message.chat.id])
                     await schedule_entry(user_schedule[message.chat.id])
                     user_states.pop(message.chat.id)
                     user_schedule.pop(message.chat.id)
@@ -459,6 +538,21 @@ async def message_handler(message):
                     await bot.send_message(message.chat.id, welcome_message, reply_markup=main_menu_admin)
                 else:
                     await bot.send_message(message.chat.id, welcome_message, reply_markup=main_menu_markup)
+            elif message.text == "/settings":
+                user_config = user_settings.find_one({"_id": str(message.from_user.id)})
+                if not user_config:
+                    user_settings.insert_one({"_id": str(message.from_user.id), "deadline_reminder": False})
+                    await bot.send_message(message.chat.id,"Ваш ID не було знайдено, тому я створив вам новий профіль налаштувань.\nТут Ви можете вимкнути нагадування про дедлайни, та я не буду надсилати вам повідомлення зранку.")
+                user_config = user_settings.find_one({"_id": str(message.from_user.id)})
+                deadline_reminder_value = user_config["deadline_reminder"]
+                deadline_reminder_status = "Вимкнено" if not deadline_reminder_value else "Увімкнено"
+                message_text = f"*Ваші налаштування:*\n\nНагадування про дедлайни: {deadline_reminder_status}"
+
+                markup = types.InlineKeyboardMarkup()
+                toggle_deadline_reminder_btn = types.InlineKeyboardButton("Перемкнути нагадування про дедлайни", callback_data="toggle_deadline_reminder")
+                markup.add(toggle_deadline_reminder_btn)
+
+                await bot.send_message(message.chat.id, message_text, reply_markup=markup, parse_mode="Markdown")
             elif message.text == "/keyboard":
                 if str(message.from_user.id) in admins:
                     await bot.send_message(message.chat.id, "Надаю клавіатуру.", reply_markup=main_menu_admin)
@@ -533,6 +627,11 @@ async def message_handler(message):
                     await bot.send_message(message.chat.id, result, parse_mode="Markdown", reply_markup=admin_deadlines_markup)
                 else:
                     await bot.send_message(message.chat.id, result, parse_mode="Markdown")
+            elif message.text == "Відмітитись на парах":
+                if str(message.from_user.id) in admins:
+                    await show_lessons_for_attendance(message)
+                else:
+                    await show_lessons_for_attendance(message)
             elif message.text == "Додати" and str(message.from_user.id) in admins:
                 user_states[message.chat.id] = "adding_deadline"
                 await bot.send_message(message.chat.id, "Надішліть мені заголовок дедлайну.")
@@ -631,27 +730,78 @@ async def message_handler(message):
 # Handle callback query
 @bot.callback_query_handler(func=lambda call: True)
 async def callback_query(call):
-    user_id = call.data.split("_")[1]
-    entry = pending_join_collection.find({"_id": int(user_id)})
-    if call.data.startswith("approve_"):
-        info = list(entry)[0]
+    if call.data.startswith("approve_") or call.data.startswith("decline_") or call.data.startswith("blacklist_"):
+        user_id = call.data.split("_")[1]
+        entry = pending_join_collection.find({"_id": int(user_id)})
+        if call.data.startswith("approve_"):
+            info = list(entry)[0]
 
-        pending_join_collection.delete_one({"_id": int(user_id)})
-        group_collection.insert_one({"_id": user_id, "username": info["info"][0]})
-        await bot.send_message(user_id, "Вітаю, Ваш запит на доступ було ухвалено!\nПриємного користування <3", reply_markup=main_menu_markup)
-        logging.info(f"[REQUEST] [{call.message.from_user.username}] - Request was approved!")
-    elif call.data.startswith("decline_"):
-        pending_join_collection.delete_one({"_id": int(user_id)})
-        await bot.send_message(user_id, "Нажаль Ваш запит на доступ було відхилено.")
-        logging.info(f"[REQUEST] [{call.message.from_user.username}] - Request was denied")
-    elif call.data.startswith("blacklist_"):
-        info = list(entry)[0]
+            pending_join_collection.delete_one({"_id": int(user_id)})
+            group_collection.insert_one({"_id": user_id, "username": info["info"][0]})
+            await bot.send_message(user_id, "Вітаю, Ваш запит на доступ було ухвалено!\nПриємного користування <3", reply_markup=main_menu_markup)
+            logging.info(f"[REQUEST] [{call.message.from_user.username}] - Request was approved!")
+        elif call.data.startswith("decline_"):
+            pending_join_collection.delete_one({"_id": int(user_id)})
+            await bot.send_message(user_id, "Нажаль Ваш запит на доступ було відхилено.")
+            logging.info(f"[REQUEST] [{call.message.from_user.username}] - Request was denied")
+        elif call.data.startswith("blacklist_"):
+            info = list(entry)[0]
 
-        pending_join_collection.delete_one({"_id": int(user_id)})
-        blacklist_requests.insert_one({"_id": user_id, "username": info["info"][0]})
-        await bot.send_message(user_id, "Вас було занесено до чорного списку, запити від вас більше надходити не будуть.")
-        logging.info(f"[REQUEST] [{call.message.from_user.username}] - User blacklisted from now.")
-    await bot.edit_message_reply_markup(chat_id=call.message.chat.id, message_id=call.message.id)
+            pending_join_collection.delete_one({"_id": int(user_id)})
+            blacklist_requests.insert_one({"_id": user_id, "username": info["info"][0]})
+            await bot.send_message(user_id, "Вас було занесено до чорного списку, запити від вас більше надходити не будуть.")
+            logging.info(f"[REQUEST] [{call.message.from_user.username}] - User blacklisted from now.")
+        await bot.edit_message_reply_markup(chat_id=call.message.chat.id, message_id=call.message.id)
+    elif call.data.startswith("mark_"):
+        _, day, lesson_number = call.data.split("_")
+        print(day)
+        day_to_find = datetime.datetime.strptime(f"{day}.{datetime.datetime.now().year}", "%d.%m.%Y").strftime("%A")
+        print(day_to_find)
+        user_id = call.from_user.id
+        username = call.from_user.username or "N/A"
+        first_name = call.from_user.first_name or ""
+        last_name = call.from_user.last_name or ""
+
+        if lesson_number == "clear":
+            attendance_collection.delete_many({"userid": user_id})
+            await bot.answer_callback_query(call.id, "Відмітки скасовано.")
+        else:
+            lesson_number = int(lesson_number)
+            attendance_record = attendance_collection.find_one({"userid": user_id, "day": day, "lesson": lesson_number})
+
+            if attendance_record:
+                await bot.answer_callback_query(call.id, f"Ви вже відмічені на {lesson_number} парі.")
+            else:
+                attendance_collection.update_one(
+                    {"userid": user_id, "day": day, "lesson": lesson_number},
+                    {"$addToSet": {"attendees": [call.from_user.username, call.from_user.first_name, call.from_user.last_name]}},
+                    upsert=True
+                )
+                await bot.answer_callback_query(call.id, f"Вас відмічено на {lesson_number} парі!")
+    elif call.data == "view_marked":
+        day = datetime.datetime.now().strftime("%d.%m")
+        await view_attendance(call.message, day)
+    elif call.data.startswith("history_"):
+        _, day = call.data.split("_")
+        await view_attendance(call.message, day)
+        await bot.answer_callback_query(call.id, f"Надаю історію відміток за {day}!")
+    elif call.data == "toggle_deadline_reminder":
+        logging.info(f"Callback data recieves: {call.data}")
+        user_id = str(call.from_user.id)
+        user_config = user_settings.find_one({"_id": user_id})
+
+        new_value = not user_config["deadline_reminder"]
+        user_settings.update_one({"_id": user_id}, {"$set": {"deadline_reminder": new_value}})
+
+        status_text = "Увімкнено" if new_value else "Вимкнено"
+        await bot.answer_callback_query(call.id, f"Нагадування про дедлайни {status_text}!")
+
+        message_text = f"*Ваші налаштування:*\n\nНагадування про дедлайни: {status_text}"
+        markup = types.InlineKeyboardMarkup()
+        toggle_reminder_button = types.InlineKeyboardButton("Перемкнути нагадування про дедлайни", callback_data="toggle_deadline_reminder")
+        markup.add(toggle_reminder_button)
+        await bot.edit_message_text(message_text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+
 
 # START BOT
 async def main():
