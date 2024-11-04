@@ -667,25 +667,34 @@ async def message_handler(message):
 
 
             logging.info(f"[MESSAGE] [{message.from_user.first_name} {message.from_user.last_name}] - {message.text}")
-        elif message.chat.type == "supergroup" or message.chat.type == "group":
-            bot_info = await bot.get_me()
-            bot_member = await bot.get_chat_member(message.chat.id, bot_info.id)
-            # Group commands
-            if message.text == "/sw":
-                schedule = await get_week_schedule()
-                if bot_member.status in ["administrator", "creator"]:
-                    await bot.delete_message(message.chat.id, message.message_id)
-                await bot.send_message(message.chat.id, schedule, parse_mode="Markdown")
-            elif message.text == "/s":
-                today = datetime.datetime.now().strftime('%A')
-                schedule = await get_schedule(today)
-                if bot_member.status in ["administrator", "creator"]:
-                    await bot.delete_message(message.chat.id, message.message_id)
-                await bot.send_message(message.chat.id, schedule, parse_mode="Markdown")
-            elif message.text == "/clear_markup":
-                await bot.send_message(message.chat.id, "Клавіатуру видалено!", reply_markup=ReplyKeyboardRemove())
-            else:
-                await bot.send_message(message.chat.id, "В групі працюють тільки команди:\n\n/s - розклад на сьогодні\n/sw - розклад на тиждень\n/clear_markup - видалити клавіатуру.")
+        elif str(message.text)[0] == "!":
+            if message.chat.type == "supergroup" or message.chat.type == "group":
+                bot_info = await bot.get_me()
+                bot_member = await bot.get_chat_member(message.chat.id, bot_info.id)
+                # Group commands
+                if message.text == "!sw":
+                    schedule = await get_week_schedule()
+                    sent_message = await bot.send_message(message.chat.id, schedule, parse_mode="Markdown")
+                    if bot_member.status in ["administrator", "creator"]:
+                        await bot.delete_message(message.chat.id, message.message_id)
+                        chat = await bot.get_chat(message.chat.id)
+                        if chat.pinned_message:
+                            await bot.unpin_chat_message(message.chat.id, chat.pinned_message.message_id)
+                        await bot.pin_chat_message(message.chat.id, sent_message.message_id)
+                elif message.text == "!s":
+                    today = datetime.datetime.now().strftime('%A')
+                    schedule = await get_schedule(today)
+                    sent_message = await bot.send_message(message.chat.id, schedule, parse_mode="Markdown")
+                    if bot_member.status in ["administrator", "creator"]:
+                        await bot.delete_message(message.chat.id, message.message_id)
+                        chat = await bot.get_chat(message.chat.id)
+                        if chat.pinned_message:
+                            await bot.unpin_chat_message(message.chat.id, chat.pinned_message.message_id)
+                        await bot.pin_chat_message(message.chat.id, sent_message.message_id)
+                elif message.text == "!clear_markup":
+                    await bot.send_message(message.chat.id, "Клавіатуру видалено!", reply_markup=ReplyKeyboardRemove())
+                else:
+                    await bot.send_message(message.chat.id, "В групі працюють тільки команди:\n\n!s - розклад на сьогодні\n!sw - розклад на тиждень\n!clear_markup - видалити клавіатуру.")
     else:
         info_arr = [message.from_user.username, message.from_user.first_name, message.from_user.last_name]
         if message.text == "Надіслати запит":
