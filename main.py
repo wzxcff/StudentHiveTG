@@ -11,7 +11,6 @@ from telebot import types
 from telebot.async_telebot import AsyncTeleBot
 from telebot.types import ReplyKeyboardRemove
 
-# TODO: Implement in schedule view check if it's exceeds 4096 symbols (max tg symbols), and do something with it.
 # TODO: Fix attendance view
 
 # logging setup
@@ -295,23 +294,28 @@ async def view_attendance(message, day):
 
 
 async def get_week_schedule():
-    result = "———————————————————"
+    day_schedules = []  # List to store each day's schedule as a separate message
+
     for day in day_weeks:
         schedule = schedule_collection.find({"day": day})
-        result += f"\n\n{day}\n\n"
+        day_message = f"———————————————————\n\n{day}\n\n"
 
         has_entries = False
         for entry in schedule:
             has_entries = True
-            result += f"*Пара {entry['number']}:*\n*Дисципліна:* {entry['subject']}\n*Тип:* {entry['type']}\n*Викладач:* {entry['lecturer']}\n*Час:* {entry['time']}\n*Посилання:* {entry['link']}\n\n"
+            day_message += (f"*Пара {entry['number']}:*\n"
+                            f"*Дисципліна:* {entry['subject']}\n"
+                            f"*Тип:* {entry['type']}\n"
+                            f"*Викладач:* {entry['lecturer']}\n"
+                            f"*Час:* {entry['time']}\n"
+                            f"*Посилання:* {entry['link']}\n\n")
         if not has_entries:
-            result += "Пар немає.\n\n"
-        result += "———————————————————"
+            day_message += "Пар немає.\n\n"
 
-    if len(result) < 4096:
-        return result
-    else:
-        pass
+        day_message += "———————————————————"
+        day_schedules.append(day_message)  # Add the day's message to the list
+
+    return day_schedules
 
 
 async def get_server_status():
@@ -668,7 +672,8 @@ async def message_handler(message):
                 await bot.send_message(message.chat.id, schedule, parse_mode="Markdown")
             elif message.text == "Тиждень":
                 schedule = await get_week_schedule()
-                await bot.send_message(message.chat.id, schedule, parse_mode="Markdown")
+                for el in schedule:
+                    await bot.send_message(message.chat.id, el, parse_mode="Markdown")
             elif message.text == "Редагувати":
                 if str(message.from_user.id) in admins:
                     await bot.send_message(message.chat.id, "Оберіть день.", reply_markup=admin_schedule_edit)
