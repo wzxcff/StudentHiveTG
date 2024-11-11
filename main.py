@@ -2,6 +2,7 @@ import os, logging, asyncio, datetime
 import platform
 import subprocess
 import psutil, time
+import uuid
 
 from datetime import timedelta
 from pymongo import MongoClient
@@ -10,11 +11,8 @@ from telebot import types
 from telebot.async_telebot import AsyncTeleBot
 from telebot.types import ReplyKeyboardRemove
 
-# TODO: Implement in schedule view check if it's greater than 4096 symbols (max tg symbols), and do something with it.
-# TODO: Make marking on lessons
-# TODO: Make joke
-# TODO: Make notification from headman working
-
+# TODO: Implement in schedule view check if it's exceeds 4096 symbols (max tg symbols), and do something with it.
+# TODO: Fix attendance view
 
 # logging setup
 
@@ -33,7 +31,7 @@ group_names = str(os.getenv("GROUP_NAMES")).replace("[", "").replace("]", "").sp
 unique = str(os.getenv("UNIQUE")).replace("[", "").replace("]", "").split(", ")
 lecturers = str(os.getenv("LECTURERS")).replace("[", "").replace("]", "").split(", ") + ["Повернутись"]
 
-#DB
+# DB
 client = MongoClient("localhost", 27017)
 db = client["student_hive_db"]
 schedule_collection = db["schedules"]
@@ -44,6 +42,7 @@ blacklist_requests = db["blacklist_requests"]
 user_settings = db["user_settings"]
 deadlines_collection = db["deadlines"]
 attendance_collection = db["attendance"]
+notification_collection = db["notifications"]
 
 day_weeks = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
 user_states = {}
@@ -68,8 +67,10 @@ links_arr = str(os.getenv("LINKS")).replace("[", "").replace("]", "").split(", "
 
 # MARKUPS
 
+
 async def append_group_json():
     pass
+
 
 def build_reply_buttons(admin_markup, labels):
     buttons = []
@@ -78,12 +79,14 @@ def build_reply_buttons(admin_markup, labels):
         buttons.append(button)
     admin_markup.add(*buttons)
 
+
 def build_inline_buttons(admin_markup, labels):
     buttons = []
     for label in labels:
         button = types.InlineKeyboardButton(label, callback_data=label)
         buttons.append(button)
     admin_markup.add(*buttons)
+
 
 back_keyboard = types.ReplyKeyboardMarkup(row_width=1, resize_keyboard=True)
 back_button = types.KeyboardButton("Повернутись")
@@ -162,6 +165,14 @@ main_feedback_markup.add(back_button)
 guest_markup = types.ReplyKeyboardMarkup(row_width=1, resize_keyboard=False)
 guest_markup.add(types.KeyboardButton("Надіслати запит"))
 
+admin_notif_markup = types.ReplyKeyboardMarkup(row_width=1, resize_keyboard=False)
+admin_notif_labels = ["Зробити оповістку", "Минулі оповістки", "Очистити оповістки", "Повернутись"]
+build_reply_buttons(admin_notif_markup, admin_notif_labels)
+
+delete_notifs_confirmation = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
+delete_notifs_labels = ["Так", "Ні"]
+build_reply_buttons(delete_notifs_confirmation, delete_notifs_labels)
+
 logging.info("Built buttons")
 # DB HANDLERS
 
@@ -202,12 +213,14 @@ async def schedule_entry(data_dict: dict):
         if sorted_entries:
             schedule_collection.insert_many(sorted_entries)
 
+
 async def get_schedule(day):
     entries = schedule_collection.find({"day": day})
     schedule_list = []
     for entry in entries:
         schedule_list.append(f"*Пара {entry['number']}:*\n*Дисципліна:* {entry['subject']}\n*Тип:* {entry['type']}\n*Викладач:* {entry['lecturer']}\n*Час:* {entry['time']}\n*Посилання:* {entry['link']}\n")
     return "\n".join(schedule_list) if schedule_list else f"Сьогодні немає пар. ({day})"
+
 
 async def show_lessons_for_attendance(message):
     day = datetime.datetime.now().strftime("%d.%m")
@@ -216,7 +229,8 @@ async def show_lessons_for_attendance(message):
 
     if not lessons:
         await bot.send_message(message.chat.id, "Сьогодні немає пар.")
-        return
+        if str(message.from_user.id) not in admins:
+            return
     markup = types.InlineKeyboardMarkup()
     for lesson in lessons:
         lesson_number = lesson["number"]
@@ -229,6 +243,7 @@ async def show_lessons_for_attendance(message):
     await bot.send_message(message.chat.id, await get_schedule(day_to_find) + f"\n\n*Поставте відмітку на яких парах плануєте бути.*", reply_markup=markup, parse_mode="Markdown")
 
 
+# FIXME
 async def view_attendance(message, day):
     day_to_find = datetime.datetime.strptime(day + f".{datetime.datetime.now().year}", "%d.%m.%Y").strftime("%A")
     lesson_attendance = attendance_collection.find({"day": day}).sort("lesson", 1)
@@ -278,6 +293,7 @@ async def view_attendance(message, day):
 
     await bot.send_message(message.chat.id, response, parse_mode="Markdown", reply_markup=markup)
 
+
 async def get_week_schedule():
     result = "———————————————————"
     for day in day_weeks:
@@ -296,6 +312,7 @@ async def get_week_schedule():
         return result
     else:
         pass
+
 
 async def get_server_status():
     uptime = subprocess.check_output("uptime -p", shell=True).decode().strip()
@@ -319,12 +336,14 @@ async def get_server_status():
     )
     return status_message
 
+
 async def clear_old_attendance():
     today = datetime.datetime.now()
     clear_date = (today - datetime.timedelta(days=9)).strftime("%d.%m")
 
     attendance_collection.delete_many({"day": clear_date})
     logging.info("Cleared old attendances!")
+
 
 async def send_daily_notifications():
     while True:
@@ -351,7 +370,6 @@ async def send_daily_notifications():
 
         deadlines_next_day = list(deadlines_collection.find().sort("date", 1))
 
-
         if deadlines_next_day:
             for user_id in users:
                 try:
@@ -375,15 +393,71 @@ async def send_daily_notifications():
 
         await asyncio.sleep(86400)
 
+
+async def make_group_notification(message):
+    notification_id = str(uuid.uuid4())
+
+    notification_entry = {
+        "_id": notification_id,
+        "message": message.text,
+        "timestamp": datetime.datetime.now(),
+        "reactions": {}
+    }
+    notification_collection.insert_one(notification_entry)
+
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    markup.add(types.InlineKeyboardButton("✅", callback_data=f"notif_yes_{notification_id}"), types.InlineKeyboardButton("❌", callback_data=f"notif_no_{notification_id}"))
+
+    users = group_collection.find()
+    logging.info("Started group notification")
+    for user in users:
+        try:
+            await bot.send_message(int(user["_id"]), f"*Оповістка:*\n\n{message.text}", parse_mode="Markdown", reply_markup=markup)
+            logging.info(f"Successfully sent notification to {user["_id"]}, {user["username"]}")
+        except Exception as e:
+            logging.warning(f"Failed to send message to {user["_id"]}, {user["username"]}: {e}")
+
+
+async def view_notifications(message):
+    found = False
+    notifs = notification_collection.find()
+    group_data = group_collection.find()
+    user_id_to_username = {str(user["_id"]): user["username"] for user in group_data}
+    for notif in notifs:
+        reactions = notif.get("reactions", {})
+        usernames_yes = []
+        usernames_no = []
+
+        for user_id, reaction in reactions.items():
+            if reaction == "yes" and user_id in user_id_to_username:
+                usernames_yes.append(f"@{user_id_to_username[user_id]}")
+            elif reaction == "no" and user_id in user_id_to_username:
+                usernames_no.append(f"@{user_id_to_username[user_id]}")
+
+        formatted_message = (
+            f"*ID:* {notif['_id']}\n"
+            f"*Дата та час:* {notif['timestamp'].strftime('%d.%m %H:%M:%S')}\n\n"
+            f"*Повідомлення:*\n{notif['message']}\n\n"
+            f"*Реакції ✅:* {', '.join(usernames_yes) if usernames_yes else 'Немає'}\n"
+            f"*Реакції ❌:* {', '.join(usernames_no) if usernames_no else 'Немає'}"
+        )
+        found = True
+        await bot.send_message(message.chat.id, formatted_message, parse_mode="Markdown")
+    if not found:
+        await bot.send_message(message.chat.id, "Історії оповісток не існує, зробіть оповістку щоб тут щось зʼявилось")
+
+
 # BOT HANDLERS
 
 # Using different handlers for feedback, because we don't need to log it.
+
 
 # Not being logged
 @bot.message_handler(content_types=["text"], func=lambda message: message.text == "Фідбек старості")
 async def handle_feedback(message):
     await bot.send_message(message.chat.id, "Анонімний фідбек.\nВи можете надіслати фідбек старості, в повідомлені не будуть передані ваші особисті дані, також ці дані не доступні розробнику.\nУведіть текст повідомлення.", reply_markup=back_keyboard)
     user_states[message.chat.id] = "awaiting_feedback"
+
 
 # Not being logged
 @bot.message_handler(content_types=["text"], func=lambda message:user_states.get(message.chat.id) == "awaiting_feedback")
@@ -403,6 +477,7 @@ async def send_feedback(message):
             else:
                 await bot.send_message(message.chat.id, "Ваш фідбек надіслано, дякую!", reply_markup=main_menu_markup)
             user_states.pop(message.chat.id, None)
+
 
 # Main message handler which being logged
 @bot.message_handler(content_types=['text'])
@@ -524,8 +599,8 @@ async def message_handler(message):
             elif user_state == "confirmation":
                 if message.text == "Так, вірно":
                     await schedule_entry(user_schedule[message.chat.id])
-                    user_states.pop(message.chat.id)
-                    user_schedule.pop(message.chat.id)
+                    user_states.pop(message.chat.id, None)
+                    user_schedule.pop(message.chat.id, None)
                     await bot.send_message(message.chat.id, "Зміни збережено!", reply_markup=main_menu_admin)
                 elif message.text == "Ні, скинути":
                     user_states.pop(message.chat.id, None)
@@ -613,13 +688,10 @@ async def message_handler(message):
                         entry_date = entry["date"].strftime("%d.%m")
                         entry_time = entry["date"].strftime("%H:%M")
 
-                        # Check if the date has changed from the previous entry
                         if current_date != entry_date:
-                            # Add a new date header for each unique date
                             result += f"\n*{entry_date}*\n"
                             current_date = entry_date
 
-                        # Add time and title of the deadline under the date header
                         result += f"{entry_time} – {entry['title']}\n"
                 else:
                     result = "Дедлайнів немає."
@@ -635,6 +707,41 @@ async def message_handler(message):
             elif message.text == "Додати" and str(message.from_user.id) in admins:
                 user_states[message.chat.id] = "adding_deadline"
                 await bot.send_message(message.chat.id, "Надішліть мені заголовок дедлайну.")
+            elif message.text == "Оповістки" and str(message.from_user.id) in admins:
+                await bot.send_message(message.chat.id, "Меню оповісток.", reply_markup=admin_notif_markup)
+            elif message.text == "Зробити оповістку" and str(message.from_user.id) in admins:
+                user_states[message.chat.id] = "making_notif"
+                await bot.send_message(message.chat.id, "Чекаю на текст оповістки:", reply_markup=back_keyboard)
+            elif message.text == "Очистити оповістки" and str(message.from_user.id) in admins:
+                user_states[message.chat.id] = "notifs_deletion_confirm"
+                await bot.send_message(message.chat.id, "Ви впевнені що хочете очистити історію оповісток? Ця дія видалить їх назавжди", reply_markup=delete_notifs_confirmation)
+            elif message.text == "Минулі оповістки" and str(message.from_user.id) in admins:
+                await view_notifications(message)
+            elif message.text == "Повідомити про проблему":
+                user_states[message.chat.id] = "sending_bug"
+                await bot.send_message(message.chat.id, "Знайшли проблему або щось працює не так, як заплановано?\n\nОсь форма повідомлення:", reply_markup=back_keyboard)
+                await bot.send_message(message.chat.id, "*Стислий опис багу:*\n\n*Кроки які Ви зробили щоб побачити баг:*\n\n*Коментар:*\n\n", parse_mode="Markdown")
+            elif user_state == "sending_bug":
+                user_states.pop(message.chat.id, None)
+                if message.text == "Повернутись":
+                    return
+                await bot.send_message(int(devs[0]), f"Вам прийшло нове повідомлення про баг.\nВід @{message.from_user.username}\n\n*Повідомлення:*\n\n{message.text}", parse_mode="Markdown")
+                if str(message.from_user.id) in admins:
+                    await bot.send_message(message.chat.id, "Ваше повідомлення було надіслано розробнику, дякую Вам за фідбек!", reply_markup=main_menu_admin)
+                else:
+                    await bot.send_message(message.chat.id, "Ваше повідомлення було надіслано розробнику, дякую Вам за фідбек!", reply_markup=main_menu_markup)
+            elif user_state == "notifs_deletion_confirm":
+                if message.text == "Ні":
+                    await bot.send_message(message.chat.id, "Скасував дію", reply_markup=main_menu_admin)
+                    return
+                notification_collection.delete_many({})
+                await bot.send_message(message.chat.id, "Всю історію оповісток було видалено", reply_markup=main_menu_admin)
+            elif user_state == "making_notif":
+                user_states.pop(message.chat.id, None)
+                if message.text == "Повернутись":
+                    return
+                await make_group_notification(message)
+                await bot.send_message(message.chat.id, "Оповістку надіслано", reply_markup=main_menu_admin)
             elif user_state == "adding_deadline":
                 user_states[message.chat.id] = "choosing_time"
                 user_deadlines[message.chat.id] = {"title": message.text}
@@ -663,8 +770,6 @@ async def message_handler(message):
                         break
                 else:
                     await bot.send_message(message.chat.id, "Йой! Не знайшов такого дедлайну.")
-
-
 
             logging.info(f"[MESSAGE] [{message.from_user.first_name} {message.from_user.last_name}] - {message.text}")
         elif str(message.text)[0] == "!":
@@ -736,6 +841,7 @@ async def message_handler(message):
             logging.info(f"[REQUEST] [{message.from_user.username}] - Someone tried to access bot! ")
             await bot.send_message(message.chat.id, "Після оновлення бот став з обмеженим доступом, якщо Ви бачете це повідмолення, вас не було занесено до вайт лісту.\n\nЯкщо вважаєте що це було помилково, або вам потрібен доступ - звʼязок зі старостою за кнопкою нижче.", reply_markup=guest_markup)
 
+
 # Handle callback query
 @bot.callback_query_handler(func=lambda call: True)
 async def callback_query(call):
@@ -795,7 +901,7 @@ async def callback_query(call):
         await view_attendance(call.message, day)
         await bot.answer_callback_query(call.id, f"Надаю історію відміток за {day}!")
     elif call.data == "toggle_deadline_reminder":
-        logging.info(f"Callback data recieves: {call.data}")
+        logging.info(f"Callback data receives: {call.data}")
         user_id = str(call.from_user.id)
         user_config = user_settings.find_one({"_id": user_id})
 
@@ -810,11 +916,32 @@ async def callback_query(call):
         toggle_reminder_button = types.InlineKeyboardButton("Перемкнути нагадування про дедлайни", callback_data="toggle_deadline_reminder")
         markup.add(toggle_reminder_button)
         await bot.edit_message_text(message_text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+    elif call.data.startswith("notif_"):
+        _, reaction, notification_id = call.data.split("_")
+        print(f"_: {_}, reaction: {reaction}, notification_id: {notification_id}")
+
+        notification = notification_collection.find_one({"_id": str(notification_id)})
+        if not notification:
+            await bot.answer_callback_query(call.id, "Оповістку не знайдено!")
+            return
+
+        current_reactions = notification.get("reactions", {})
+        if call.from_user.id in current_reactions:
+            if current_reactions[call.from_user.id] == reaction:
+                await bot.answer_callback_query(call.id, "Ви вже відреагували.")
+                return
+            else:
+                notification_collection.update_one({"_id": notification_id}, {"$set": {f"reactions.{call.from_user.id}": reaction}})
+                await bot.answer_callback_query(call.id, "Вашу реакцію записано!")
+        else:
+            notification_collection.update_one({"_id": notification_id}, {"$set": {f"reactions.{call.from_user.id}": reaction}})
+            await bot.answer_callback_query(call.id, "Вашу реакцію записано!")
 
 
 # START BOT
 async def main():
     asyncio.create_task(send_daily_notifications())
+    await bot.send_message(int(devs[0]), "Bot started successfully!")
     await bot.polling(none_stop=True)
 
 logging.info("Started successfully!")
