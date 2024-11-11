@@ -243,7 +243,7 @@ async def show_lessons_for_attendance(message):
     await bot.send_message(message.chat.id, await get_schedule(day_to_find) + f"\n\n*Поставте відмітку на яких парах плануєте бути.*", reply_markup=markup, parse_mode="Markdown")
 
 
-# FIXME
+# IN-WORK
 async def view_attendance(message, day):
     day_to_find = datetime.datetime.strptime(day + f".{datetime.datetime.now().year}", "%d.%m.%Y").strftime("%A")
     lesson_attendance = attendance_collection.find({"day": day}).sort("lesson", 1)
@@ -254,9 +254,9 @@ async def view_attendance(message, day):
     for record in lesson_attendance:
         lesson = record["lesson"]
         attendees = record["attendees"]
+        subject = record.get("subject", "Невідома дисципліна")
 
         lesson_info = schedule_collection.find_one({"day": day_to_find, "number": str(lesson)})
-        subject = lesson_info["subject"] if lesson_info else "Невідома дисципліна"
 
         if lesson not in lessons_dict:
             lessons_dict[lesson] = {
@@ -869,9 +869,7 @@ async def callback_query(call):
         await bot.edit_message_reply_markup(chat_id=call.message.chat.id, message_id=call.message.id)
     elif call.data.startswith("mark_"):
         _, day, lesson_number = call.data.split("_")
-        print(day)
         day_to_find = datetime.datetime.strptime(f"{day}.{datetime.datetime.now().year}", "%d.%m.%Y").strftime("%A")
-        print(day_to_find)
         user_id = call.from_user.id
         username = call.from_user.username or "N/A"
         first_name = call.from_user.first_name or ""
@@ -882,6 +880,10 @@ async def callback_query(call):
             await bot.answer_callback_query(call.id, "Відмітки скасовано.")
         else:
             lesson_number = int(lesson_number)
+
+            lesson_info = schedule_collection.find_one({"day": day_to_find, "number": str(lesson_number)})
+            subject = lesson_info["subject"] if lesson_info else "Невідома дисципліна"
+
             attendance_record = attendance_collection.find_one({"userid": user_id, "day": day, "lesson": lesson_number})
 
             if attendance_record:
@@ -889,7 +891,10 @@ async def callback_query(call):
             else:
                 attendance_collection.update_one(
                     {"userid": user_id, "day": day, "lesson": lesson_number},
-                    {"$addToSet": {"attendees": [call.from_user.username, call.from_user.first_name, call.from_user.last_name]}},
+                    {
+                        "$addToSet": {"attendees": [call.from_user.username, call.from_user.first_name, call.from_user.last_name]},
+                        "$set": {"subject": subject}
+                    },
                     upsert=True
                 )
                 await bot.answer_callback_query(call.id, f"Вас відмічено на {lesson_number} парі!")
@@ -918,7 +923,6 @@ async def callback_query(call):
         await bot.edit_message_text(message_text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
     elif call.data.startswith("notif_"):
         _, reaction, notification_id = call.data.split("_")
-        print(f"_: {_}, reaction: {reaction}, notification_id: {notification_id}")
 
         notification = notification_collection.find_one({"_id": str(notification_id)})
         if not notification:
