@@ -11,8 +11,6 @@ from telebot import types
 from telebot.async_telebot import AsyncTeleBot
 from telebot.types import ReplyKeyboardRemove
 
-# TODO: Fix attendance view
-
 # logging setup
 
 logging.basicConfig(filename="logs.log", encoding="utf-8", level=logging.INFO, format="[%(asctime)s][%(name)s]: %(levelname)s - %(message)s", datefmt="%d.%m, %H:%M:%S")
@@ -92,11 +90,11 @@ back_button = types.KeyboardButton("Повернутись")
 back_keyboard.add(back_button)
 
 main_menu_markup = types.ReplyKeyboardMarkup(row_width=3, resize_keyboard=True)
-main_menu_labels = ["Розклад", "Відмітитись на парах", "Дедлайни", "Фідбек старості", "Повідомити про проблему"]
+main_menu_labels = ["Розклад", "Відмітитись на парах", "Дедлайни", "Фідбек старості", "Повідомити про проблему", "Конфідеційність та підтримка"]
 build_reply_buttons(main_menu_markup, main_menu_labels)
 
 main_menu_admin = types.ReplyKeyboardMarkup(row_width=3, resize_keyboard=True)
-main_menu_admin_labels = main_menu_labels + ["Оповістки"]
+main_menu_admin_labels = main_menu_labels[:-1] + ["Оповістки"] + main_menu_labels[-1:]
 build_reply_buttons(main_menu_admin, main_menu_admin_labels)
 
 main_schedule_markup = types.ReplyKeyboardMarkup(row_width=2, resize_keyboard=True)
@@ -127,14 +125,17 @@ admin_schedule_subjects = types.ReplyKeyboardMarkup(row_width=3, resize_keyboard
 admin_schedule_subjects_labels = ["Алгоритмізація та програмування", "Вища математика", "Дискретна математика", "Університетські студії та вступ до компʼютерних наук", "Іноземна мова", "Історія України: Цивілізаційний вимір", "Кураторська Година", "Повернутись", " "]
 build_reply_buttons(admin_schedule_subjects, admin_schedule_subjects_labels)
 
-links = dict(zip(admin_schedule_subjects_labels, links_arr))
+subjects_for_links = ["Алгоритмізація Струков", "Алгоритмізація Саділо", "Вища", "Дискретна", "Вступ до фаху лекція", "Вступ до фаху практика", "Іноземна", "Історія лекція", "Історія семінар", "Кураторська"]
+links = dict(zip(subjects_for_links, links_arr))
+print(links)
 
 admin_schedule_type = types.ReplyKeyboardMarkup(row_width=3, resize_keyboard=True)
 admin_schedule_type_labels = ["Лекція", "Практика", "Лабораторна", "Контрольна", "Повернутись", "Екзамен"]
 build_reply_buttons(admin_schedule_type, admin_schedule_type_labels)
 
 admin_schedule_links = types.ReplyKeyboardMarkup(row_width=3, resize_keyboard=True)
-build_reply_buttons(admin_schedule_links, list(links.keys()))
+true_links = [link for link in list(links.keys()) if links.get(link) != "-"]
+build_reply_buttons(admin_schedule_links, true_links)
 
 admin_schedule_lecturer = types.ReplyKeyboardMarkup(row_width=3, resize_keyboard=True)
 build_reply_buttons(admin_schedule_lecturer, lecturers)
@@ -242,7 +243,6 @@ async def show_lessons_for_attendance(message):
     await bot.send_message(message.chat.id, await get_schedule(day_to_find) + f"\n\n*Поставте відмітку на яких парах плануєте бути.*", reply_markup=markup, parse_mode="Markdown")
 
 
-# IN-WORK
 async def view_attendance(message, day):
     day_to_find = datetime.datetime.strptime(day + f".{datetime.datetime.now().year}", "%d.%m.%Y").strftime("%A")
     lesson_attendance = attendance_collection.find({"day": day}).sort("lesson", 1)
@@ -590,7 +590,7 @@ async def message_handler(message):
                     else:
                         user_schedule[message.chat.id]["number_edit"] = None
                         user_states[message.chat.id] = "confirmation"
-                        await bot.send_message(message.chat.id,f"*Перевірте інформацію*\n\nДень тижня: {user_schedule[message.chat.id]['day']}\nДисципліна: {user_schedule[message.chat.id]['subject']}\nТип: {user_schedule[message.chat.id]['type']}\nВикладач: {user_schedule[message.chat.id]['lecturer']}\nЧас: {user_schedule[message.chat.id]['time']}\nПосилання: {user_schedule[message.chat.id]['link']}\n\nЦе вірно?", parse_mode="Markdown", reply_markup=admin_confirmation)
+                        await bot.send_message(message.chat.id,f"*Перевірте інформацію*\n\nДень тижня: {user_schedule[message.chat.id]['day']}\nДисципліна: {user_schedule[message.chat.id]['subject']}\nТип: {user_schedule[message.chat.id]['type']}\nВикладач: {user_schedule[message.chat.id]['lecturer']}\nЧас: {user_schedule[message.chat.id]['time']}\nПосилання: {user_schedule[message.chat.id]['link']}\n\nЦе вірно?", parse_mode="Markdown", reply_markup=admin_confirmation, disable_web_page_preview=True)
             elif user_state == "selecting_number_to_edit":
                 if message.text == "Повернутись":
                     await bot.send_message(message.chat.id, "Скасував зміну розкладу.", reply_markup=main_menu_admin)
@@ -599,7 +599,7 @@ async def message_handler(message):
                 else:
                     user_states[message.chat.id] = "confirmation"
                     user_schedule[message.chat.id]["number_edit"] = message.text
-                    await bot.send_message(message.chat.id, f"*Перевірте інформацію*\n\nДень тижня: {user_schedule[message.chat.id]['day']}\nДисципліна: {user_schedule[message.chat.id]['subject']}\nТип: {user_schedule[message.chat.id]['type']}\nВикладач: {user_schedule[message.chat.id]['lecturer']}\nЧас: {user_schedule[message.chat.id]['time']}\nПосилання: {user_schedule[message.chat.id]['link']}\n\nЦе вірно?", parse_mode="Markdown", reply_markup=admin_confirmation)
+                    await bot.send_message(message.chat.id, f"*Перевірте інформацію*\n\nДень тижня: {user_schedule[message.chat.id]['day']}\nДисципліна: {user_schedule[message.chat.id]['subject']}\nТип: {user_schedule[message.chat.id]['type']}\nВикладач: {user_schedule[message.chat.id]['lecturer']}\nЧас: {user_schedule[message.chat.id]['time']}\nПосилання: {user_schedule[message.chat.id]['link']}\n\nЦе вірно?", parse_mode="Markdown", reply_markup=admin_confirmation, disable_web_page_preview=True)
             elif user_state == "confirmation":
                 if message.text == "Так, вірно":
                     await schedule_entry(user_schedule[message.chat.id])
@@ -612,11 +612,41 @@ async def message_handler(message):
                     await bot.send_message(message.chat.id, "Зміни скинуто!", reply_markup=main_menu_admin)
             # Default commands
             elif message.text == "/start":
-                welcome_message = "Hello world!"
+                welcome_message = f"👋 Привіт, *{message.from_user.first_name}*!\n Мене було створено спеціально для групи *КС-11*, щоб допомагати вам зі всіма організаційними питаннями.\n\n 💼 Я можу показати розклад пар, допомогти вам відмітитися на парах і навіть нагадати про важливі події та дедлайни.\n\n ❓ Якщо вам потрібна допомога або ви хочете дізнатися про мої можливості, просто натисніть -> */help*.\n\n 📢 Для останніх оновлень, статусу бота та багфіксів підписуйтесь на наш канал: [оновлення бота](https://t.me/+oh-WlmlOuyI4ODEy).\n\n Залишайтеся продуктивними та успіхів у навчанні! 🎓"
                 if str(message.from_user.id) in admins:
-                    await bot.send_message(message.chat.id, welcome_message, reply_markup=main_menu_admin)
+                    await bot.send_message(message.chat.id, welcome_message, reply_markup=main_menu_admin, parse_mode="Markdown", disable_web_page_preview=True)
                 else:
-                    await bot.send_message(message.chat.id, welcome_message, reply_markup=main_menu_markup)
+                    await bot.send_message(message.chat.id, welcome_message, reply_markup=main_menu_markup, parse_mode="Markdown", disable_web_page_preview=True)
+            elif message.text == "/help":
+                help_message = ("*Розклад* — можливість ознайомитись з розкладом на сьогодні або на тиждень.\n\n"
+                                "*Відмітитись на парах* — відмічайтеся на яких парах плануєте бути, це значно полегшить життя старості.\n\n"
+                                "*Дедлайни* — подивитись найближчі дедлайни, але не переймайтеся, я нагадаю Вам про дедлайн за день до дати.\n\n"
+                                "*Фідбек старості* — надішліть анонімний фідбек старості, це може бути будь що. Це працює *ПОВНІСТЮ* анонімно, навіть розробник не зможе побачити хто відправив повідомлення.\n\n"
+                                "*Повідомити про проблему* — звʼязок з розробником щодо багів в боті.\n\n"
+                                "/settings – тут можна включити нагадування щодо дедлайнів.\n\n"
+                                "\nДопомога адміністраторам -> /admin__help")
+                if str(message.from_user.id) in admins:
+                    await bot.send_message(message.chat.id, help_message, reply_markup=main_menu_admin, parse_mode="Markdown", disable_web_page_preview=True)
+                else:
+                    await bot.send_message(message.chat.id, help_message, reply_markup=main_menu_markup, parse_mode="Markdown", disable_web_page_preview=True)
+            elif message.text == "/admin_help" or message.text == "/adminhelp":
+                if str(message.from_user.id) in admins:
+                    admin_help_message = ("Адміністратори можуть трішки більше ніж звичайний користувач.\n\n\n"
+                                          "1. *Розклад* -> Редагувати\n"
+                                          "1.1 Обираєте день для редагування.\n"
+                                          "1.2 Обираєте дію:\nДодати — додати пару.\nРедагувати — редагувати якусь окрему пару.\nВидалити пару — видалити якусь окрему пару.\nВидалити все — видалити всі пари на цей день.\n"
+                                          "Надалі слідкуєте за інструкціями бота :)\n\n"
+                                          "2. *Відмітитись на парах* -> Подивитись відмічених\n"
+                                          "2.1 Це надасть вам історію відміток за сьогодні, та можливість побачити історію відміток за останній тиждень.\n\n"
+                                          "3. *Дедлайни* -> Додати\n"
+                                          "3.1 Вкажіть заголовок дедлайну (текст дедлайну), можете вказати будь що.\n"
+                                          "3.2 Вкажіть дату дедлайну у спецільному форматі, важливо щоб дата відповідала зазначеному формату.\n"
+                                          "3.3 За день до дедлайну, о 9 годині ранку, я надішлю нагадування всім користовучам які не відключили сповіщення в налаштуваннях (/settings)\n\n"
+                                          "4. *Оповістки*\n"
+                                          "4.1 Ну тут думаю все зрозуміло, робіть оповістки для всіх користувачів боту та дивіться історію реакцій.")
+                    await bot.send_message(message.chat.id, admin_help_message, reply_markup=main_menu_admin, parse_mode="Markdown", disable_web_page_preview=True)
+                else:
+                    await bot.send_message(message.chat.id, "Нажаль, у вас немає доступу.", reply_markup=main_menu_markup)
             elif message.text == "/settings":
                 user_config = user_settings.find_one({"_id": str(message.from_user.id)})
                 if not user_config:
@@ -637,10 +667,6 @@ async def message_handler(message):
                     await bot.send_message(message.chat.id, "Надаю клавіатуру.", reply_markup=main_menu_admin)
                 else:
                     await bot.send_message(message.chat.id, "Надаю клавіатуру.", reply_markup=main_menu_markup)
-            elif message.text == "/help":
-                pass
-            elif message.text == "/admin_help":
-                pass
             elif message.text == "/log" and str(message.from_user.id) in devs:
                 try:
                     with open("logs.log") as f:
@@ -656,6 +682,9 @@ async def message_handler(message):
             elif message.text == "/system_status" and str(message.from_user.id) in devs:
                 await bot.send_message(message.chat.id, await get_server_status())
             # Navigation
+            elif message.text == "Конфідеційність та підтримка":
+                privacy_and_support_message = "*Щодо використання ваших даних*\n\nРозробник ніяк не може отримати доступ до вашого акаунту, паролів або особистих повідомлень. Бот зберігає лише ваш *ID, юзернейм, ім’я та прізвище* для забезпечення коректної роботи сервісу в межах університетської групи.\n\nВаші дані залишаються конфіденційними та використовуються виключно для покращення взаємодії з ботом. Жодна інформація не передається третім сторонам або використовується для інших цілей.\n\nЯкщо у вас є питання стосовно збереження даних або ви хочете видалити вашу інформацію, будь ласка, звертайтеся до мене напряму — *@wzxcff*. Я завжди на зв'язку і готовий допомогти.\n\n\n**Дякую за вашу фінансову підтримку цього бота!** Ваша допомога надзвичайно важлива для мене і дозволяє продовжувати покращувати сервіс. \n\nhttps://send.monobank.ua/jar/7yZdwvmNRf"
+                await bot.send_message(message.chat.id, privacy_and_support_message, disable_web_page_preview=True, parse_mode="Markdown")
             elif message.text == "Повернутись":
                 if str(message.from_user.id) in admins:
                     await bot.send_message(message.chat.id, "Надав головне меню.", reply_markup=main_menu_admin)
