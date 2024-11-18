@@ -318,6 +318,18 @@ async def get_week_schedule():
     return day_schedules
 
 
+async def replace_actual_username(message):
+    user_id = message.from_user.id
+    username_now = message.from_user.username
+    user_db_profile = group_collection.find_one({"user_id": str(user_id)})
+    if user_db_profile:
+        if user_db_profile.get("username") != username_now:
+            group_collection.update_one({"user_id": str(user_id)}, {"$set": {"username": username_now}})
+            logging.info(f"Changed old username ({user_db_profile.get('username')}) to {username_now})")
+    else:
+        logging.warning("When trying to change actual username, error occurred")
+
+
 async def get_server_status():
     uptime = subprocess.check_output("uptime -p", shell=True).decode().strip()
 
@@ -695,6 +707,7 @@ async def message_handler(message):
                     await bot.send_message(message.chat.id, "Оберіть режим", reply_markup=admin_schedule_markup)
                 else:
                     await bot.send_message(message.chat.id, "Оберіть режим", reply_markup=main_schedule_markup)
+                await replace_actual_username(message)
             elif message.text == "Сьогодні":
                 today = datetime.datetime.now().strftime('%A')
                 schedule = await get_schedule(today)
@@ -738,6 +751,7 @@ async def message_handler(message):
                     await show_lessons_for_attendance(message)
                 else:
                     await show_lessons_for_attendance(message)
+                await replace_actual_username(message)
             elif message.text == "Додати" and str(message.from_user.id) in admins:
                 user_states[message.chat.id] = "adding_deadline"
                 await bot.send_message(message.chat.id, "Надішліть мені заголовок дедлайну.")
