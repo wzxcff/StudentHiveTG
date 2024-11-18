@@ -127,7 +127,6 @@ build_reply_buttons(admin_schedule_subjects, admin_schedule_subjects_labels)
 
 subjects_for_links = ["Алгоритмізація Струков", "Алгоритмізація Саділо", "Вища", "Дискретна", "Вступ до фаху лекція", "Вступ до фаху практика", "Іноземна", "Історія лекція", "Історія семінар", "Кураторська"]
 links = dict(zip(subjects_for_links, links_arr))
-print(links)
 
 admin_schedule_type = types.ReplyKeyboardMarkup(row_width=3, resize_keyboard=True)
 admin_schedule_type_labels = ["Лекція", "Практика", "Лабораторна", "Контрольна", "Повернутись", "Екзамен"]
@@ -826,16 +825,7 @@ async def message_handler(message):
                 bot_info = await bot.get_me()
                 bot_member = await bot.get_chat_member(message.chat.id, bot_info.id)
                 # Group commands
-                if message.text == "!sw":
-                    schedule = await get_week_schedule()
-                    sent_message = await bot.send_message(message.chat.id, schedule, parse_mode="HTML")
-                    if bot_member.status in ["administrator", "creator"]:
-                        # await bot.delete_message(message.chat.id, message.message_id)
-                        # chat = await bot.get_chat(message.chat.id)
-                        # if chat.pinned_message:
-                        #     await bot.unpin_chat_message(message.chat.id, chat.pinned_message.message_id)
-                        await bot.pin_chat_message(message.chat.id, sent_message.message_id)
-                elif message.text == "!s":
+                if message.text == "!s":
                     today = datetime.datetime.now().strftime('%A')
                     schedule = await get_schedule(today)
                     sent_message = await bot.send_message(message.chat.id, schedule, parse_mode="HTML")
@@ -845,10 +835,20 @@ async def message_handler(message):
                         # if chat.pinned_message:
                         #     await bot.unpin_chat_message(message.chat.id, chat.pinned_message.message_id)
                         await bot.pin_chat_message(message.chat.id, sent_message.message_id)
+                elif message.text == "!st":
+                    day = (datetime.datetime.now() + datetime.timedelta(days=1)).strftime('%A')
+                    schedule = await get_schedule(day)
+                    sent_message = await bot.send_message(message.chat.id, f"<b>{day}</b>\n\n\n{schedule}", parse_mode="HTML")
+                    if bot_member.status in ["administrator", "creator"]:
+                        # await bot.delete_message(message.chat.id, message.message_id)
+                        # chat = await bot.get_chat(message.chat.id)
+                        # if chat.pinned_message:
+                        #     await bot.unpin_chat_message(message.chat.id, chat.pinned_message.message_id)
+                        await bot.pin_chat_message(message.chat.id, sent_message.message_id)
                 elif message.text == "!clear_markup":
                     await bot.send_message(message.chat.id, "Клавіатуру видалено!", reply_markup=ReplyKeyboardRemove())
                 else:
-                    await bot.send_message(message.chat.id, "В групі працюють тільки команди:\n\n!s - розклад на сьогодні\n!sw - розклад на тиждень\n!clear_markup - видалити клавіатуру.")
+                    await bot.send_message(message.chat.id, "В групі працюють тільки команди:\n\n!s (schedule) - розклад на сьогодні\n!st (schedule tomorrow) - розклад на завтра\n!clear_markup - видалити клавіатуру.")
     else:
         info_arr = [message.from_user.username, message.from_user.first_name, message.from_user.last_name]
         if message.text == "Надіслати запит":
