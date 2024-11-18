@@ -321,11 +321,11 @@ async def get_week_schedule():
 async def replace_actual_username(message):
     user_id = message.from_user.id
     username_now = message.from_user.username
-    user_db_profile = group_collection.find_one({"user_id": str(user_id)})
+    user_db_profile = group_collection.find_one({"_id": str(user_id)})
     logging.info(f"Checking user {user_db_profile.get('username')} username!")
     if user_db_profile:
         if user_db_profile.get("username") != username_now:
-            group_collection.update_one({"user_id": str(user_id)}, {"$set": {"username": username_now}})
+            group_collection.update_one({"_id": str(user_id)}, {"$set": {"username": username_now}})
             logging.info(f"Changed old username ({user_db_profile.get('username')}) to {username_now})")
     else:
         logging.warning("When trying to change actual username, error occurred")
