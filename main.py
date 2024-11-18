@@ -847,6 +847,19 @@ async def message_handler(message):
                         await bot.pin_chat_message(message.chat.id, sent_message.message_id)
                 elif message.text == "!clear_markup":
                     await bot.send_message(message.chat.id, "Клавіатуру видалено!", reply_markup=ReplyKeyboardRemove())
+                elif message.text == "!clear_pinned":
+                    if str(message.from_user.id) in admins:
+                        if bot_member.status in ["administrator", "creator"]:
+                            chat = await bot.get_chat(message.chat.id)
+                            while True:
+                                if chat.pinned_message:
+                                    await bot.unpin_chat_message(message.chat.id, chat.pinned_message.message_id)
+                                else:
+                                    break
+                        else:
+                            await bot.send_message(message.chat.id, "У бота не вистачає прав для відкріплення всіх повідомлень в чаті!")
+                    else:
+                        await bot.send_message(message.chat.id, "Не спрацює :))")
                 else:
                     await bot.send_message(message.chat.id, "В групі працюють тільки команди:\n\n!s (schedule) - розклад на сьогодні\n!st (schedule tomorrow) - розклад на завтра\n!clear_markup - видалити клавіатуру.")
     else:
