@@ -218,7 +218,7 @@ async def get_schedule(day):
     entries = schedule_collection.find({"day": day})
     schedule_list = []
     for entry in entries:
-        schedule_list.append(f"*Пара {entry['number']}:*\n*Дисципліна:* {entry['subject']}\n*Тип:* {entry['type']}\n*Викладач:* {entry['lecturer']}\n*Час:* {entry['time']}\n*Посилання:* {entry['link']}\n")
+        schedule_list.append(f"<b>Пара {entry['number']}:</b>\n<b>Дисципліна:</b> {entry['subject']}\n<b>Тип:</b> {entry['type']}\n<b>Викладач:</b> {entry['lecturer']}\n<b>Час:</b> {entry['time']}\n<b>Посилання:</b> {entry['link']}\n")
     return "\n".join(schedule_list) if schedule_list else f"Сьогодні немає пар. ({day})"
 
 
@@ -240,14 +240,14 @@ async def show_lessons_for_attendance(message):
     markup.add(types.InlineKeyboardButton("Скасувати відмітки", callback_data=f"mark_{day}_clear"))
     if str(message.from_user.id) in admins:
         markup.add(types.InlineKeyboardButton("Подивитись відмічених", callback_data=f"view_marked"))
-    await bot.send_message(message.chat.id, await get_schedule(day_to_find) + f"\n\n*Поставте відмітку на яких парах плануєте бути.*", reply_markup=markup, parse_mode="Markdown")
+    await bot.send_message(message.chat.id, await get_schedule(day_to_find) + f"\n\n<b>Поставте відмітку на яких парах плануєте бути.</b>", reply_markup=markup, parse_mode="HTML", disable_web_page_preview=True)
 
 
 async def view_attendance(message, day):
     day_to_find = datetime.datetime.strptime(day + f".{datetime.datetime.now().year}", "%d.%m.%Y").strftime("%A")
     lesson_attendance = attendance_collection.find({"day": day}).sort("lesson", 1)
 
-    response = f"Відвідуваність за *{day}*.\n\n"
+    response = f"Відвідуваність за <b>{day}</b>.\n\n"
     lessons_dict = {}
 
     for record in lesson_attendance:
@@ -281,7 +281,7 @@ async def view_attendance(message, day):
                 response += f" – Error occurred, can't find info about user. See logs for details."
                 logging.warning(f"Failed to get user info for {user}: {e}")
 
-    if response == f"Відвідуваність за *{day}*.\n\n":
+    if response == f"Відвідуваність за <b>{day}</b>.\n\n":
         response += "Відміток немає"
 
     markup = types.InlineKeyboardMarkup()
@@ -290,7 +290,7 @@ async def view_attendance(message, day):
         markup.add(types.InlineKeyboardButton(delta_day, callback_data=f"history_{delta_day}"))
     markup.add(types.InlineKeyboardButton(datetime.datetime.now().strftime("%d.%m"), callback_data=f"history_{datetime.datetime.now().strftime("%d.%m")}"))
 
-    await bot.send_message(message.chat.id, response, parse_mode="Markdown", reply_markup=markup)
+    await bot.send_message(message.chat.id, response, reply_markup=markup, parse_mode="HTML")
 
 
 async def get_week_schedule():
@@ -303,12 +303,12 @@ async def get_week_schedule():
         has_entries = False
         for entry in schedule:
             has_entries = True
-            day_message += (f"*Пара {entry['number']}:*\n"
-                            f"*Дисципліна:* {entry['subject']}\n"
-                            f"*Тип:* {entry['type']}\n"
-                            f"*Викладач:* {entry['lecturer']}\n"
-                            f"*Час:* {entry['time']}\n"
-                            f"*Посилання:* {entry['link']}\n\n")
+            day_message += (f"<b>Пара {entry['number']}:</b>\n"
+                            f"<b>Дисципліна:</b> {entry['subject']}\n"
+                            f"<b>Тип:</b> {entry['type']}\n"
+                            f"<b>Викладач:</b> {entry['lecturer']}\n"
+                            f"<b>Час:</b> {entry['time']}\n"
+                            f"<b>Посилання:</b> {entry['link']}\n\n")
         if not has_entries:
             day_message += "Пар немає.\n\n"
 
@@ -379,13 +379,13 @@ async def send_daily_notifications():
                 try:
                     if user_settings.find_one({"_id": str(user_id), "deadline_reminder": True}):
                         if str(user_id) in unique:
-                            message = f"Доброго ранку, мій солоденький. Нагадую тобі щодо дедлайнів на завтра <3.\n\n*{next_day}*\n\n"
+                            message = f"Доброго ранку, мій солоденький. Нагадую тобі щодо дедлайнів на завтра <3.\n\n<b>{next_day}</b>\n\n"
                         else:
-                            message = f"Доброго ранку, нагадую щодо дедлайнів на завтра.\n\n*{next_day}*\n\n"
+                            message = f"Доброго ранку, нагадую щодо дедлайнів на завтра.\n\n<b>{next_day}</b>\n\n"
                         for deadline in deadlines_next_day:
                             if deadline["date"].strftime("%d.%m") == next_day:
                                 message += f"{deadline["date"].strftime("%H.%M")} – {deadline['title']}\n"
-                        await bot.send_message(int(user_id), message, parse_mode="Markdown")
+                        await bot.send_message(int(user_id), message, parse_mode="HTML")
                     else:
                         logging.info(f"User {user_id} has turned off deadline reminders.")
                 except Exception as e:
@@ -416,7 +416,7 @@ async def make_group_notification(message):
     logging.info("Started group notification")
     for user in users:
         try:
-            await bot.send_message(int(user["_id"]), f"*Оповістка:*\n\n{message.text}", parse_mode="Markdown", reply_markup=markup)
+            await bot.send_message(int(user["_id"]), f"Оповістка:\n\n{message.text}", reply_markup=markup)
             logging.info(f"Successfully sent notification to {user["_id"]}, {user["username"]}")
         except Exception as e:
             logging.warning(f"Failed to send message to {user["_id"]}, {user["username"]}: {e}")
@@ -439,14 +439,14 @@ async def view_notifications(message):
                 usernames_no.append(f"@{user_id_to_username[user_id]}")
 
         formatted_message = (
-            f"*ID:* {notif['_id']}\n"
-            f"*Дата та час:* {notif['timestamp'].strftime('%d.%m %H:%M:%S')}\n\n"
-            f"*Повідомлення:*\n{notif['message']}\n\n"
-            f"*Реакції ✅:* {', '.join(usernames_yes) if usernames_yes else 'Немає'}\n"
-            f"*Реакції ❌:* {', '.join(usernames_no) if usernames_no else 'Немає'}"
+            f"<b>ID:</b> {notif['_id']}\n"
+            f"<b>Дата та час:</b> {notif['timestamp'].strftime('%d.%m %H:%M:%S')}\n\n"
+            f"<b>Повідомлення:</b>\n{notif['message']}\n\n"
+            f"<b>Реакції ✅:</b> {', '.join(usernames_yes) if usernames_yes else 'Немає'}\n"
+            f"<b>Реакції ❌:</b> {', '.join(usernames_no) if usernames_no else 'Немає'}"
         )
         found = True
-        await bot.send_message(message.chat.id, formatted_message, parse_mode="Markdown")
+        await bot.send_message(message.chat.id, formatted_message, parse_mode="HTML")
     if not found:
         await bot.send_message(message.chat.id, "Історії оповісток не існує, зробіть оповістку щоб тут щось зʼявилось")
 
@@ -474,8 +474,8 @@ async def send_feedback(message):
                 await bot.send_message(message.chat.id, "Скасував відправку фідбеку.", reply_markup=main_menu_markup)
             user_states.pop(message.chat.id, None)
         else:
-            feedback_message = f"*Анонімний фідбек:*\n\n{message.text}"
-            await bot.send_message(headman, feedback_message, parse_mode="Markdown")
+            feedback_message = f"<b>Анонімний фідбек:</b>\n\n{message.text}"
+            await bot.send_message(headman, feedback_message, parse_mode="HTML")
             if str(message.from_user.id) in admins:
                 await bot.send_message(message.chat.id, "Ваш фідбек надіслано, дякую!", reply_markup=main_menu_admin)
             else:
@@ -590,7 +590,7 @@ async def message_handler(message):
                     else:
                         user_schedule[message.chat.id]["number_edit"] = None
                         user_states[message.chat.id] = "confirmation"
-                        await bot.send_message(message.chat.id,f"*Перевірте інформацію*\n\nДень тижня: {user_schedule[message.chat.id]['day']}\nДисципліна: {user_schedule[message.chat.id]['subject']}\nТип: {user_schedule[message.chat.id]['type']}\nВикладач: {user_schedule[message.chat.id]['lecturer']}\nЧас: {user_schedule[message.chat.id]['time']}\nПосилання: {user_schedule[message.chat.id]['link']}\n\nЦе вірно?", parse_mode="Markdown", reply_markup=admin_confirmation, disable_web_page_preview=True)
+                        await bot.send_message(message.chat.id,f"<b>Перевірте інформацію</b>\n\nДень тижня: {user_schedule[message.chat.id]['day']}\nДисципліна: {user_schedule[message.chat.id]['subject']}\nТип: {user_schedule[message.chat.id]['type']}\nВикладач: {user_schedule[message.chat.id]['lecturer']}\nЧас: {user_schedule[message.chat.id]['time']}\nПосилання: {user_schedule[message.chat.id]['link']}\n\nЦе вірно?", parse_mode="HTML", reply_markup=admin_confirmation, disable_web_page_preview=True)
             elif user_state == "selecting_number_to_edit":
                 if message.text == "Повернутись":
                     await bot.send_message(message.chat.id, "Скасував зміну розкладу.", reply_markup=main_menu_admin)
@@ -599,7 +599,7 @@ async def message_handler(message):
                 else:
                     user_states[message.chat.id] = "confirmation"
                     user_schedule[message.chat.id]["number_edit"] = message.text
-                    await bot.send_message(message.chat.id, f"*Перевірте інформацію*\n\nДень тижня: {user_schedule[message.chat.id]['day']}\nДисципліна: {user_schedule[message.chat.id]['subject']}\nТип: {user_schedule[message.chat.id]['type']}\nВикладач: {user_schedule[message.chat.id]['lecturer']}\nЧас: {user_schedule[message.chat.id]['time']}\nПосилання: {user_schedule[message.chat.id]['link']}\n\nЦе вірно?", parse_mode="Markdown", reply_markup=admin_confirmation, disable_web_page_preview=True)
+                    await bot.send_message(message.chat.id, f"<b>Перевірте інформацію</b>\n\nДень тижня: {user_schedule[message.chat.id]['day']}\nДисципліна: {user_schedule[message.chat.id]['subject']}\nТип: {user_schedule[message.chat.id]['type']}\nВикладач: {user_schedule[message.chat.id]['lecturer']}\nЧас: {user_schedule[message.chat.id]['time']}\nПосилання: {user_schedule[message.chat.id]['link']}\n\nЦе вірно?", parse_mode="HTML", reply_markup=admin_confirmation, disable_web_page_preview=True)
             elif user_state == "confirmation":
                 if message.text == "Так, вірно":
                     await schedule_entry(user_schedule[message.chat.id])
@@ -612,39 +612,39 @@ async def message_handler(message):
                     await bot.send_message(message.chat.id, "Зміни скинуто!", reply_markup=main_menu_admin)
             # Default commands
             elif message.text == "/start":
-                welcome_message = f"👋 Привіт, *{message.from_user.first_name}*!\n Мене було створено спеціально для групи *КС-11*, щоб допомагати вам зі всіма організаційними питаннями.\n\n 💼 Я можу показати розклад пар, допомогти вам відмітитися на парах і навіть нагадати про важливі події та дедлайни.\n\n ❓ Якщо вам потрібна допомога або ви хочете дізнатися про мої можливості, просто натисніть -> */help*.\n\n 📢 Для останніх оновлень, статусу бота та багфіксів підписуйтесь на наш канал: [оновлення бота](https://t.me/+oh-WlmlOuyI4ODEy).\n\n Залишайтеся продуктивними та успіхів у навчанні! 🎓"
+                welcome_message = f"👋 Привіт, <b>{message.from_user.first_name}</b>!\n Мене було створено спеціально для групи <b>КС-11</b>, щоб допомагати вам зі всіма організаційними питаннями.\n\n 💼 Я можу показати розклад пар, допомогти вам відмітитися на парах і навіть нагадати про важливі події та дедлайни.\n\n ❓ Якщо вам потрібна допомога або ви хочете дізнатися про мої можливості, просто натисніть -> <b>/help</b>.\n\n 📢 Для останніх оновлень, статусу бота та багфіксів підписуйтесь на наш канал: [оновлення бота](https://t.me/+oh-WlmlOuyI4ODEy).\n\n Залишайтеся продуктивними та успіхів у навчанні! 🎓"
                 if str(message.from_user.id) in admins:
-                    await bot.send_message(message.chat.id, welcome_message, reply_markup=main_menu_admin, parse_mode="Markdown", disable_web_page_preview=True)
+                    await bot.send_message(message.chat.id, welcome_message, reply_markup=main_menu_admin, parse_mode="HTML", disable_web_page_preview=True)
                 else:
-                    await bot.send_message(message.chat.id, welcome_message, reply_markup=main_menu_markup, parse_mode="Markdown", disable_web_page_preview=True)
+                    await bot.send_message(message.chat.id, welcome_message, reply_markup=main_menu_markup, parse_mode="HTML", disable_web_page_preview=True)
             elif message.text == "/help":
-                help_message = ("*Розклад* — можливість ознайомитись з розкладом на сьогодні або на тиждень.\n\n"
-                                "*Відмітитись на парах* — відмічайтеся на яких парах плануєте бути, це значно полегшить життя старості.\n\n"
-                                "*Дедлайни* — подивитись найближчі дедлайни, але не переймайтеся, я нагадаю Вам про дедлайн за день до дати.\n\n"
-                                "*Фідбек старості* — надішліть анонімний фідбек старості, це може бути будь що. Це працює *ПОВНІСТЮ* анонімно, навіть розробник не зможе побачити хто відправив повідомлення.\n\n"
-                                "*Повідомити про проблему* — звʼязок з розробником щодо багів в боті.\n\n"
+                help_message = ("<b>Розклад</b> — можливість ознайомитись з розкладом на сьогодні або на тиждень.\n\n"
+                                "<b>Відмітитись на парах</b> — відмічайтеся на яких парах плануєте бути, це значно полегшить життя старості.\n\n"
+                                "<b>Дедлайни</b> — подивитись найближчі дедлайни, але не переймайтеся, я нагадаю Вам про дедлайн за день до дати.\n\n"
+                                "<b>Фідбек старості</b> — надішліть анонімний фідбек старості, це може бути будь що. Це працює <b>ПОВНІСТЮ</b> анонімно, навіть розробник не зможе побачити хто відправив повідомлення.\n\n"
+                                "<b>Повідомити про проблему</b> — звʼязок з розробником щодо багів в боті.\n\n"
                                 "/settings – тут можна включити нагадування щодо дедлайнів.\n\n"
-                                "\nДопомога адміністраторам -> /admin__help")
+                                "\nДопомога адміністраторам -> /admin_help")
                 if str(message.from_user.id) in admins:
-                    await bot.send_message(message.chat.id, help_message, reply_markup=main_menu_admin, parse_mode="Markdown", disable_web_page_preview=True)
+                    await bot.send_message(message.chat.id, help_message, reply_markup=main_menu_admin, parse_mode="HTML", disable_web_page_preview=True)
                 else:
-                    await bot.send_message(message.chat.id, help_message, reply_markup=main_menu_markup, parse_mode="Markdown", disable_web_page_preview=True)
+                    await bot.send_message(message.chat.id, "Немає доступу.", reply_markup=main_menu_markup, parse_mode="HTML", disable_web_page_preview=True)
             elif message.text == "/admin_help" or message.text == "/adminhelp":
                 if str(message.from_user.id) in admins:
                     admin_help_message = ("Адміністратори можуть трішки більше ніж звичайний користувач.\n\n\n"
-                                          "1. *Розклад* -> Редагувати\n"
+                                          "1. <b>Розклад</b> -> Редагувати\n"
                                           "1.1 Обираєте день для редагування.\n"
                                           "1.2 Обираєте дію:\nДодати — додати пару.\nРедагувати — редагувати якусь окрему пару.\nВидалити пару — видалити якусь окрему пару.\nВидалити все — видалити всі пари на цей день.\n"
                                           "Надалі слідкуєте за інструкціями бота :)\n\n"
-                                          "2. *Відмітитись на парах* -> Подивитись відмічених\n"
+                                          "2. <b>Відмітитись на парах</b> -> Подивитись відмічених\n"
                                           "2.1 Це надасть вам історію відміток за сьогодні, та можливість побачити історію відміток за останній тиждень.\n\n"
-                                          "3. *Дедлайни* -> Додати\n"
+                                          "3. <b>Дедлайни</b> -> Додати\n"
                                           "3.1 Вкажіть заголовок дедлайну (текст дедлайну), можете вказати будь що.\n"
                                           "3.2 Вкажіть дату дедлайну у спецільному форматі, важливо щоб дата відповідала зазначеному формату.\n"
                                           "3.3 За день до дедлайну, о 9 годині ранку, я надішлю нагадування всім користовучам які не відключили сповіщення в налаштуваннях (/settings)\n\n"
-                                          "4. *Оповістки*\n"
+                                          "4. <b>Оповістки</b>\n"
                                           "4.1 Ну тут думаю все зрозуміло, робіть оповістки для всіх користувачів боту та дивіться історію реакцій.")
-                    await bot.send_message(message.chat.id, admin_help_message, reply_markup=main_menu_admin, parse_mode="Markdown", disable_web_page_preview=True)
+                    await bot.send_message(message.chat.id, admin_help_message, reply_markup=main_menu_admin, parse_mode="HTML", disable_web_page_preview=True)
                 else:
                     await bot.send_message(message.chat.id, "Нажаль, у вас немає доступу.", reply_markup=main_menu_markup)
             elif message.text == "/settings":
@@ -655,13 +655,13 @@ async def message_handler(message):
                 user_config = user_settings.find_one({"_id": str(message.from_user.id)})
                 deadline_reminder_value = user_config["deadline_reminder"]
                 deadline_reminder_status = "Вимкнено" if not deadline_reminder_value else "Увімкнено"
-                message_text = f"*Ваші налаштування:*\n\nНагадування про дедлайни: {deadline_reminder_status}"
+                message_text = f"<b>Ваші налаштування:</b>\n\nНагадування про дедлайни: {deadline_reminder_status}"
 
                 markup = types.InlineKeyboardMarkup()
                 toggle_deadline_reminder_btn = types.InlineKeyboardButton("Перемкнути нагадування про дедлайни", callback_data="toggle_deadline_reminder")
                 markup.add(toggle_deadline_reminder_btn)
 
-                await bot.send_message(message.chat.id, message_text, reply_markup=markup, parse_mode="Markdown")
+                await bot.send_message(message.chat.id, message_text, reply_markup=markup, parse_mode="HTML")
             elif message.text == "/keyboard":
                 if str(message.from_user.id) in admins:
                     await bot.send_message(message.chat.id, "Надаю клавіатуру.", reply_markup=main_menu_admin)
@@ -669,7 +669,7 @@ async def message_handler(message):
                     await bot.send_message(message.chat.id, "Надаю клавіатуру.", reply_markup=main_menu_markup)
             elif message.text == "/log" and str(message.from_user.id) in devs:
                 try:
-                    with open("logs.log") as f:
+                    with open("logs.log", encoding="UTF-8") as f:
                         await bot.send_document(message.chat.id, f, caption=f"{datetime.datetime.now().strftime('%d-%m-%Y %H:%M:%S')}")
                 except FileNotFoundError:
                     await bot.send_message(message.chat.id, "Не знайшов .log файлу!")
@@ -683,8 +683,8 @@ async def message_handler(message):
                 await bot.send_message(message.chat.id, await get_server_status())
             # Navigation
             elif message.text == "Конфідеційність та підтримка":
-                privacy_and_support_message = "*Щодо використання ваших даних*\n\nРозробник ніяк не може отримати доступ до вашого акаунту, паролів або особистих повідомлень. Бот зберігає лише ваш *ID, юзернейм, ім’я та прізвище* для забезпечення коректної роботи сервісу в межах університетської групи.\n\nВаші дані залишаються конфіденційними та використовуються виключно для покращення взаємодії з ботом. Жодна інформація не передається третім сторонам або використовується для інших цілей.\n\nЯкщо у вас є питання стосовно збереження даних або ви хочете видалити вашу інформацію, будь ласка, звертайтеся до мене напряму — *@wzxcff*. Я завжди на зв'язку і готовий допомогти.\n\n\n**Дякую за вашу фінансову підтримку цього бота!** Ваша допомога надзвичайно важлива для мене і дозволяє продовжувати покращувати сервіс. \n\nhttps://send.monobank.ua/jar/7yZdwvmNRf"
-                await bot.send_message(message.chat.id, privacy_and_support_message, disable_web_page_preview=True, parse_mode="Markdown")
+                privacy_and_support_message = "<b>Щодо використання ваших даних</b>\n\nРозробник ніяк не може отримати доступ до вашого акаунту, паролів або особистих повідомлень. Бот зберігає лише ваш <b>ID, юзернейм, ім’я та прізвище</b> для забезпечення коректної роботи сервісу в межах університетської групи.\n\nВаші дані залишаються конфіденційними та використовуються виключно для покращення взаємодії з ботом. Жодна інформація не передається третім сторонам або використовується для інших цілей.\n\nЯкщо у вас є питання стосовно збереження даних або ви хочете видалити вашу інформацію, будь ласка, звертайтеся до мене напряму — <b>@wzxcff</b>. Я завжди на зв'язку і готовий допомогти.\n\n\n<b>Дякую за вашу фінансову підтримку цього бота!</b> Ваша допомога надзвичайно важлива для мене і дозволяє продовжувати покращувати сервіс. \n\nhttps://send.monobank.ua/jar/7yZdwvmNRf"
+                await bot.send_message(message.chat.id, privacy_and_support_message, disable_web_page_preview=True, parse_mode="HTML")
             elif message.text == "Повернутись":
                 if str(message.from_user.id) in admins:
                     await bot.send_message(message.chat.id, "Надав головне меню.", reply_markup=main_menu_admin)
@@ -698,11 +698,11 @@ async def message_handler(message):
             elif message.text == "Сьогодні":
                 today = datetime.datetime.now().strftime('%A')
                 schedule = await get_schedule(today)
-                await bot.send_message(message.chat.id, schedule, parse_mode="Markdown")
+                await bot.send_message(message.chat.id, schedule, parse_mode="HTML", disable_web_page_preview=True)
             elif message.text == "Тиждень":
                 schedule = await get_week_schedule()
                 for el in schedule:
-                    await bot.send_message(message.chat.id, el, parse_mode="Markdown")
+                    await bot.send_message(message.chat.id, el, parse_mode="HTML", disable_web_page_preview=True)
             elif message.text == "Редагувати":
                 if str(message.from_user.id) in admins:
                     await bot.send_message(message.chat.id, "Оберіть день.", reply_markup=admin_schedule_edit)
@@ -715,7 +715,7 @@ async def message_handler(message):
             elif message.text == "Дедлайни":
                 sorted_entries = list(deadlines_collection.find().sort("date", 1))
                 if sorted_entries:
-                    result = "*Найближчі дедлайни:*\n\n"
+                    result = "<b>Найближчі дедлайни:</b>\n\n"
                     current_date = None
 
                     for entry in sorted_entries:
@@ -723,16 +723,16 @@ async def message_handler(message):
                         entry_time = entry["date"].strftime("%H:%M")
 
                         if current_date != entry_date:
-                            result += f"\n*{entry_date}*\n"
+                            result += f"\n<b>{entry_date}</b>\n"
                             current_date = entry_date
 
                         result += f"{entry_time} – {entry['title']}\n"
                 else:
                     result = "Дедлайнів немає."
                 if str(message.from_user.id) in admins:
-                    await bot.send_message(message.chat.id, result, parse_mode="Markdown", reply_markup=admin_deadlines_markup)
+                    await bot.send_message(message.chat.id, result, parse_mode="HTML", reply_markup=admin_deadlines_markup)
                 else:
-                    await bot.send_message(message.chat.id, result, parse_mode="Markdown")
+                    await bot.send_message(message.chat.id, result, parse_mode="HTML")
             elif message.text == "Відмітитись на парах":
                 if str(message.from_user.id) in admins:
                     await show_lessons_for_attendance(message)
@@ -754,12 +754,12 @@ async def message_handler(message):
             elif message.text == "Повідомити про проблему":
                 user_states[message.chat.id] = "sending_bug"
                 await bot.send_message(message.chat.id, "Знайшли проблему або щось працює не так, як заплановано?\n\nОсь форма повідомлення:", reply_markup=back_keyboard)
-                await bot.send_message(message.chat.id, "*Стислий опис багу:*\n\n*Кроки які Ви зробили щоб побачити баг:*\n\n*Коментар:*\n\n", parse_mode="Markdown")
+                await bot.send_message(message.chat.id, "<b>Стислий опис багу:</b>\n\n<b>Кроки які Ви зробили щоб побачити баг:</b>\n\n<b>Коментар:</b>\n\n", parse_mode="HTML")
             elif user_state == "sending_bug":
                 user_states.pop(message.chat.id, None)
                 if message.text == "Повернутись":
                     return
-                await bot.send_message(int(devs[0]), f"Вам прийшло нове повідомлення про баг.\nВід @{message.from_user.username}\n\n*Повідомлення:*\n\n{message.text}", parse_mode="Markdown")
+                await bot.send_message(int(devs[0]), f"Вам прийшло нове повідомлення про баг.\nВід @{message.from_user.username}\n\n<b>Повідомлення:</b>\n\n{message.text}", parse_mode="HTML")
                 if str(message.from_user.id) in admins:
                     await bot.send_message(message.chat.id, "Ваше повідомлення було надіслано розробнику, дякую Вам за фідбек!", reply_markup=main_menu_admin)
                 else:
@@ -813,22 +813,22 @@ async def message_handler(message):
                 # Group commands
                 if message.text == "!sw":
                     schedule = await get_week_schedule()
-                    sent_message = await bot.send_message(message.chat.id, schedule, parse_mode="Markdown")
+                    sent_message = await bot.send_message(message.chat.id, schedule, parse_mode="HTML")
                     if bot_member.status in ["administrator", "creator"]:
-                        await bot.delete_message(message.chat.id, message.message_id)
-                        chat = await bot.get_chat(message.chat.id)
-                        if chat.pinned_message:
-                            await bot.unpin_chat_message(message.chat.id, chat.pinned_message.message_id)
+                        # await bot.delete_message(message.chat.id, message.message_id)
+                        # chat = await bot.get_chat(message.chat.id)
+                        # if chat.pinned_message:
+                        #     await bot.unpin_chat_message(message.chat.id, chat.pinned_message.message_id)
                         await bot.pin_chat_message(message.chat.id, sent_message.message_id)
                 elif message.text == "!s":
                     today = datetime.datetime.now().strftime('%A')
                     schedule = await get_schedule(today)
-                    sent_message = await bot.send_message(message.chat.id, schedule, parse_mode="Markdown")
+                    sent_message = await bot.send_message(message.chat.id, schedule, parse_mode="HTML")
                     if bot_member.status in ["administrator", "creator"]:
-                        await bot.delete_message(message.chat.id, message.message_id)
-                        chat = await bot.get_chat(message.chat.id)
-                        if chat.pinned_message:
-                            await bot.unpin_chat_message(message.chat.id, chat.pinned_message.message_id)
+                        # await bot.delete_message(message.chat.id, message.message_id)
+                        # chat = await bot.get_chat(message.chat.id)
+                        # if chat.pinned_message:
+                        #     await bot.unpin_chat_message(message.chat.id, chat.pinned_message.message_id)
                         await bot.pin_chat_message(message.chat.id, sent_message.message_id)
                 elif message.text == "!clear_markup":
                     await bot.send_message(message.chat.id, "Клавіатуру видалено!", reply_markup=ReplyKeyboardRemove())
@@ -868,7 +868,7 @@ async def message_handler(message):
                 blacklist = types.InlineKeyboardButton("Чорний список", callback_data=f"blacklist_{message.from_user.id}")
                 keyboard.add(approve, decline, blacklist)
 
-                await bot.send_message(int(headman), f"*Новий запит на використовування боту!*\n\n\nВід {user_info}.\n\nТекст повідомлення:\n{message.text}", parse_mode="Markdown", reply_markup=keyboard)
+                await bot.send_message(int(headman), f"<b>Новий запит на використовування боту!</b>\n\n\nВід {user_info}.\n\nТекст повідомлення:\n{message.text}", parse_mode="HTML", reply_markup=keyboard)
                 await bot.send_message(message.chat.id, "Ваш запит було надіслано, чекайте на відповідь.")
                 logging.info(f"[REQUEST] [{message.from_user.username}] - Sent request to access bot!")
         else:
@@ -950,11 +950,11 @@ async def callback_query(call):
         status_text = "Увімкнено" if new_value else "Вимкнено"
         await bot.answer_callback_query(call.id, f"Нагадування про дедлайни {status_text}!")
 
-        message_text = f"*Ваші налаштування:*\n\nНагадування про дедлайни: {status_text}"
+        message_text = f"<b>Ваші налаштування:</b>\n\nНагадування про дедлайни: {status_text}"
         markup = types.InlineKeyboardMarkup()
         toggle_reminder_button = types.InlineKeyboardButton("Перемкнути нагадування про дедлайни", callback_data="toggle_deadline_reminder")
         markup.add(toggle_reminder_button)
-        await bot.edit_message_text(message_text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="Markdown")
+        await bot.edit_message_text(message_text, call.message.chat.id, call.message.message_id, reply_markup=markup, parse_mode="HTML")
     elif call.data.startswith("notif_"):
         _, reaction, notification_id = call.data.split("_")
 
