@@ -829,7 +829,7 @@ async def message_handler(message):
                     if str(message.from_user.id) in admins:
                         today = datetime.datetime.now().strftime('%A')
                         schedule = await get_schedule(today)
-                        sent_message = await bot.send_message(message.chat.id, schedule, parse_mode="HTML")
+                        sent_message = await bot.send_message(message.chat.id, schedule, parse_mode="HTML", disable_web_page_preview=True)
                         if bot_member.status in ["administrator", "creator"]:
                             # await bot.delete_message(message.chat.id, message.message_id)
                             # chat = await bot.get_chat(message.chat.id)
@@ -845,7 +845,7 @@ async def message_handler(message):
                     if str(message.from_user.id) in admins:
                         day = (datetime.datetime.now() + datetime.timedelta(days=1)).strftime('%A')
                         schedule = await get_schedule(day)
-                        sent_message = await bot.send_message(message.chat.id, f"<b>{day}</b>\n\n\n{schedule}", parse_mode="HTML")
+                        sent_message = await bot.send_message(message.chat.id, f"<b>{day}</b>\n\n\n{schedule}", parse_mode="HTML", disable_web_page_preview=True)
                         if bot_member.status in ["administrator", "creator"]:
                             # await bot.delete_message(message.chat.id, message.message_id)
                             # chat = await bot.get_chat(message.chat.id)
