@@ -826,42 +826,54 @@ async def message_handler(message):
                 bot_member = await bot.get_chat_member(message.chat.id, bot_info.id)
                 # Group commands
                 if message.text == "!s":
-                    today = datetime.datetime.now().strftime('%A')
-                    schedule = await get_schedule(today)
-                    sent_message = await bot.send_message(message.chat.id, schedule, parse_mode="HTML")
-                    if bot_member.status in ["administrator", "creator"]:
-                        # await bot.delete_message(message.chat.id, message.message_id)
-                        # chat = await bot.get_chat(message.chat.id)
-                        # if chat.pinned_message:
-                        #     await bot.unpin_chat_message(message.chat.id, chat.pinned_message.message_id)
-                        await bot.pin_chat_message(message.chat.id, sent_message.message_id)
+                    if str(message.from_user.id) in admins:
+                        today = datetime.datetime.now().strftime('%A')
+                        schedule = await get_schedule(today)
+                        sent_message = await bot.send_message(message.chat.id, schedule, parse_mode="HTML")
+                        if bot_member.status in ["administrator", "creator"]:
+                            # await bot.delete_message(message.chat.id, message.message_id)
+                            # chat = await bot.get_chat(message.chat.id)
+                            # if chat.pinned_message:
+                            #     await bot.unpin_chat_message(message.chat.id, chat.pinned_message.message_id)
+                            await bot.pin_chat_message(message.chat.id, sent_message.message_id)
+                            await bot.delete_message(message.chat.id, message.message_id)
+                        else:
+                            await bot.send_message(message.chat.id, "Надайте права адміністратора боту.")
+                    else:
+                        await bot.send_message(message.chat.id, "Не спрацює :))")
                 elif message.text == "!st":
-                    day = (datetime.datetime.now() + datetime.timedelta(days=1)).strftime('%A')
-                    schedule = await get_schedule(day)
-                    sent_message = await bot.send_message(message.chat.id, f"<b>{day}</b>\n\n\n{schedule}", parse_mode="HTML")
-                    if bot_member.status in ["administrator", "creator"]:
-                        # await bot.delete_message(message.chat.id, message.message_id)
-                        # chat = await bot.get_chat(message.chat.id)
-                        # if chat.pinned_message:
-                        #     await bot.unpin_chat_message(message.chat.id, chat.pinned_message.message_id)
-                        await bot.pin_chat_message(message.chat.id, sent_message.message_id)
+                    if str(message.from_user.id) in admins:
+                        day = (datetime.datetime.now() + datetime.timedelta(days=1)).strftime('%A')
+                        schedule = await get_schedule(day)
+                        sent_message = await bot.send_message(message.chat.id, f"<b>{day}</b>\n\n\n{schedule}", parse_mode="HTML")
+                        if bot_member.status in ["administrator", "creator"]:
+                            # await bot.delete_message(message.chat.id, message.message_id)
+                            # chat = await bot.get_chat(message.chat.id)
+                            # if chat.pinned_message:
+                            #     await bot.unpin_chat_message(message.chat.id, chat.pinned_message.message_id)
+                            await bot.pin_chat_message(message.chat.id, sent_message.message_id)
+                            await bot.delete_message(message.chat.id, message.message_id)
+                        else:
+                            await bot.send_message(message.chat.id, "Надайте права адміністратора боту.")
+                    else:
+                        await bot.send_message(message.chat.id, "Не спрацює :))")
                 elif message.text == "!clear_markup":
                     await bot.send_message(message.chat.id, "Клавіатуру видалено!", reply_markup=ReplyKeyboardRemove())
-                elif message.text == "!clear_pinned":
+                elif message.text == "!c":
                     if str(message.from_user.id) in admins:
                         if bot_member.status in ["administrator", "creator"]:
+                            await bot.delete_message(message.chat.id, message.message_id)
                             chat = await bot.get_chat(message.chat.id)
-                            while True:
-                                if chat.pinned_message:
-                                    await bot.unpin_chat_message(message.chat.id, chat.pinned_message.message_id)
-                                else:
-                                    break
+                            if chat.pinned_message:
+                                await bot.unpin_chat_message(message.chat.id, chat.pinned_message.message_id)
+                            else:
+                                await bot.send_message(message.chat.id, "Немає прикріплених повідомлень.")
                         else:
                             await bot.send_message(message.chat.id, "У бота не вистачає прав для відкріплення всіх повідомлень в чаті!")
                     else:
                         await bot.send_message(message.chat.id, "Не спрацює :))")
                 else:
-                    await bot.send_message(message.chat.id, "В групі працюють тільки команди:\n\n!s (schedule) - розклад на сьогодні\n!st (schedule tomorrow) - розклад на завтра\n!clear_markup - видалити клавіатуру.")
+                    await bot.send_message(message.chat.id, "В групі працюють тільки команди:\n\n!s (schedule) - розклад на сьогодні\n!st (schedule tomorrow) - розклад на завтра\n!clear_markup - видалити клавіатуру\n!c - відкріпити повідомлення.")
     else:
         info_arr = [message.from_user.username, message.from_user.first_name, message.from_user.last_name]
         if message.text == "Надіслати запит":
